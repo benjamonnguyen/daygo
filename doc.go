@@ -1,0 +1,2 @@
+// Package daygo
+package daygo
