@@ -66,6 +66,10 @@ func main() {
 		os.Exit(1)
 	}
 	msg := cmd()
+	// TODO jank, parseProgramArgs should be decoupled from model
+	if msg, ok := msg.(NewTaskMsg); ok {
+		m.initialMsg = msg
+	}
 
 	fmt.Println(colorize(colorYellow, logo))
 	fmt.Printf("\nEnter \"/h\" for help\n\n")
@@ -79,7 +83,6 @@ func main() {
 	m.vp = viewport.New(0, 0)
 
 	p := tea.NewProgram(m)
-	p.Send(msg)
 	if _, err := p.Run(); err != nil {
 		logger.Error(err.Error())
 	}

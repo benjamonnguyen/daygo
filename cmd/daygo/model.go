@@ -36,8 +36,9 @@ type model struct {
 	userinput textinput.Model
 
 	// supplied
-	l       *slog.Logger
-	taskSvc TaskSvc
+	l          *slog.Logger
+	taskSvc    TaskSvc
+	initialMsg NewTaskMsg
 
 	// state
 	tasks    []Task
@@ -53,7 +54,13 @@ type model struct {
 var _ tea.Model = (*model)(nil)
 
 func (m model) Init() tea.Cmd {
-	return textinput.Blink
+	var cmd tea.Cmd
+	if m.initialMsg.task.ID != 0 {
+		cmd = func() tea.Msg {
+			return m.initialMsg
+		}
+	}
+	return tea.Batch(cmd, textinput.Blink)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
