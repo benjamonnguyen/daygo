@@ -54,6 +54,19 @@ func main() {
 	taskSvc := NewTaskSvc(taskRepo)
 
 	// start program
+	m := model{
+		l:          logger,
+		timeFormat: conf.TimeFormat,
+		taskSvc:    taskSvc,
+		cmdTimeout: 3 * time.Second,
+	}
+	cmd, err := m.parseProgramArgs()
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	msg := cmd()
+
 	fmt.Println(colorize(colorYellow, logo))
 	fmt.Printf("\nEnter \"/h\" for help\n\n")
 
@@ -62,19 +75,11 @@ func main() {
 	userinput.CharLimit = 280
 	userinput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("221"))
 
-	vp := viewport.New(0, 0)
-
-	m := model{
-		l:          logger,
-		timeFormat: conf.TimeFormat,
-		taskSvc:    taskSvc,
-		cmdTimeout: 3 * time.Second,
-
-		userinput: userinput,
-		vp:        vp,
-	}
+	m.userinput = userinput
+	m.vp = viewport.New(0, 0)
 
 	p := tea.NewProgram(m)
+	p.Send(msg)
 	if _, err := p.Run(); err != nil {
 		logger.Error(err.Error())
 	}

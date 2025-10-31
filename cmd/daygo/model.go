@@ -25,11 +25,10 @@ const logo = `
 	╚═════╝ ╚═╝  ╚═╝   ╚═╝    ╚═════╝  ╚═════╝`
 
 const programUsage = `Usage:
-  daygo: start queued task
+  daygo: start next queued task
   daygo <task>: start new task
   daygo /a <task>: add task to queue
-  daygo /review [date]: review tasks and notes for target date; accepts date formats "DD-MM"/"DD-MM-YYYY" or number of days ago
-`
+  daygo /review [date]: review tasks and notes for target date; accepts date formats "DD-MM"/"DD-MM-YYYY" or number of days ago`
 
 type model struct {
 	// children
@@ -54,12 +53,7 @@ type model struct {
 var _ tea.Model = (*model)(nil)
 
 func (m model) Init() tea.Cmd {
-	cmd, err := m.parseProgramArgs()
-	if err != nil {
-		m.l.Error(err.Error())
-		return tea.Quit
-	}
-	return tea.Batch(cmd, textinput.Blink)
+	return textinput.Blink
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -383,6 +377,10 @@ func (m model) parseProgramArgs() (tea.Cmd, error) {
 	}
 
 	logger.Debug("parsed program args", "cmd", cmd, "arg", arg)
+	exit := func() tea.Msg {
+		os.Exit(0)
+		return nil
+	}
 	switch cmd {
 	case "/n", "":
 		if arg == "" {
@@ -394,15 +392,16 @@ func (m model) parseProgramArgs() (tea.Cmd, error) {
 			Name: arg,
 		})
 		if err != nil {
-			m.l.Error(err.Error())
+			return nil, err
 		}
-		return tea.Quit, nil
+		fmt.Printf(`Queued up "%s"`+"\n", arg)
+		return exit, nil
 	case "/review":
 		// TODO /review
-		return nil, fmt.Errorf("review command not implemented")
+		panic("review command not implemented")
 	default:
 		fmt.Println(colorize(colorYellow, programUsage))
-		return tea.Quit, nil
+		return exit, nil
 	}
 }
 
