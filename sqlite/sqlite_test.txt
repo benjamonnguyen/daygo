@@ -1,0 +1,69 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"os"
+	"testing"
+
+	_ "modernc.org/sqlite"
+)
+
+func TestScanJSONArrayTextColumnToStringArray_ShouldHandleParsing(t *testing.T) {
+	// arrange
+	dbPath := "/tmp/daygo-test.db"
+	f, err := os.Create(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	conn, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn.ExecContext(
+		context.Background(),
+		`CREATE TABLE test (
+    	notes TEXT);`,
+	)
+
+	conn.ExecContext(
+		context.Background(),
+		`INSERT INTO test (notes) VALUES (?);`, `["A", "B", "C"]`,
+	)
+
+	rows, err := conn.QueryContext(
+		context.Background(),
+		`SELECT * FROM test`,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// act
+	var record struct{ notes []string }
+	rows.Next()
+	if err := rows.Scan(&record.notes); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert
+	expectedNotesCnt := 3
+	if len(record.notes) != expectedNotesCnt {
+		t.Fatalf("want %d, got %d notes", expectedNotesCnt, len(record.notes))
+	}
+	if record.notes[0] != "A" {
+		t.FailNow()
+	}
+	if record.notes[1] != "B" {
+		t.FailNow()
+	}
+	if record.notes[2] != "C" {
+		t.FailNow()
+	}
+
+	// cleanup
+	os.Remove(dbPath)
+}
