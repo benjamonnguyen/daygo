@@ -4,6 +4,8 @@ import (
 	"fmt"
 )
 
+type InitMsg struct{}
+
 type NewTaskMsg struct {
 	task Task
 }

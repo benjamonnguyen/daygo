@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"slices"
 	"strings"
 	"time"
@@ -36,9 +35,8 @@ type model struct {
 	userinput textinput.Model
 
 	// supplied
-	l          *slog.Logger
-	taskSvc    TaskSvc
-	initialMsg NewTaskMsg
+	l       *slog.Logger
+	taskSvc TaskSvc
 
 	// state
 	tasks    []Task
@@ -54,13 +52,10 @@ type model struct {
 var _ tea.Model = (*model)(nil)
 
 func (m model) Init() tea.Cmd {
-	var cmd tea.Cmd
-	if m.initialMsg.task.ID != 0 {
-		cmd = func() tea.Msg {
-			return m.initialMsg
-		}
+	init := func() tea.Msg {
+		return InitMsg{}
 	}
-	return tea.Batch(cmd, textinput.Blink)
+	return tea.Batch(init, textinput.Blink)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -95,6 +90,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.h = msg.Height
 			m.userinput.Width = msg.Width
 			m.vp.Width = msg.Width
+			m.resizeViewport()
+			return m, nil
+		case InitMsg:
+			m.vp.SetContent(m.renderVisibleTasks())
 			m.resizeViewport()
 			return m, nil
 		case tea.KeyMsg:
@@ -365,50 +364,6 @@ func (m model) queueTask(task string) tea.Cmd {
 		return QueueMsg{
 			task: task,
 		}
-	}
-}
-
-func (m model) parseProgramArgs() (tea.Cmd, error) {
-	if len(os.Args) == 1 {
-		return m.startNextTask(), nil
-	}
-
-	var cmd, arg string
-	if strings.HasPrefix(os.Args[1], "/") {
-		cmd = os.Args[1]
-		if len(os.Args) > 2 {
-			arg = strings.Join(os.Args[2:], " ")
-		}
-	} else {
-		arg = strings.Join(os.Args[1:], " ")
-	}
-
-	logger.Debug("parsed program args", "cmd", cmd, "arg", arg)
-	exit := func() tea.Msg {
-		os.Exit(0)
-		return nil
-	}
-	switch cmd {
-	case "/n", "":
-		if arg == "" {
-			return m.startNextTask(), nil
-		}
-		return m.startNewTask(arg), nil
-	case "/a":
-		_, err := m.taskSvc.QueueTask(context.Background(), queueTaskRequest{
-			Name: arg,
-		})
-		if err != nil {
-			return nil, err
-		}
-		fmt.Printf(`Queued up "%s"`+"\n", arg)
-		return exit, nil
-	case "/review":
-		// TODO /review
-		panic("review command not implemented")
-	default:
-		fmt.Println(colorize(colorYellow, programUsage))
-		return exit, nil
 	}
 }
 

@@ -14,6 +14,7 @@ type TaskSvc interface {
 	EndTask(ctx context.Context, id int) (daygo.ExistingTaskRecord, error)
 	DiscardTask(ctx context.Context, id int) ([]daygo.ExistingTaskRecord, error)
 	RenameTask(ctx context.Context, id int, newName string) (daygo.ExistingTaskRecord, error)
+	DequeueTask(ctx context.Context) (daygo.ExistingTaskRecord, error)
 	QueueTask(context.Context, queueTaskRequest) (daygo.ExistingTaskRecord, error)
 	PeekNextTask(context.Context) (daygo.ExistingTaskRecord, error)
 	SkipTask(ctx context.Context, id int) error
@@ -155,6 +156,21 @@ func (s *taskSvc) RenameTask(ctx context.Context, id int, newName string) (daygo
 func (s *taskSvc) QueueTask(ctx context.Context, req queueTaskRequest) (daygo.ExistingTaskRecord, error) {
 	return s.repo.CreateTask(ctx, daygo.TaskRecord{
 		Name: req.Name,
+	})
+}
+
+func (s *taskSvc) DequeueTask(ctx context.Context) (daygo.ExistingTaskRecord, error) {
+	next, err := s.PeekNextTask(ctx)
+	if err != nil {
+		return daygo.ExistingTaskRecord{}, err
+	}
+
+	if next.ID == 0 {
+		return daygo.ExistingTaskRecord{}, fmt.Errorf("task queue is empty")
+	}
+
+	return s.StartTask(ctx, startTaskRequest{
+		ID: next.ID,
 	})
 }
 

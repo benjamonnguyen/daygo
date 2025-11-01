@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/benjamonnguyen/daygo"
@@ -53,24 +55,23 @@ func main() {
 	// svcs
 	taskSvc := NewTaskSvc(taskRepo)
 
-	// start program
-	m := model{
-		l:          logger,
-		timeFormat: conf.TimeFormat,
-		taskSvc:    taskSvc,
-		cmdTimeout: 3 * time.Second,
-	}
-	cmd, err := m.parseProgramArgs()
+	// handle initial args
+	timeout, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	opts, err := parseProgramArgs(timeout, taskSvc)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	msg := cmd()
-	// TODO jank, parseProgramArgs should be decoupled from model
-	if msg, ok := msg.(NewTaskMsg); ok {
-		m.initialMsg = msg
+	if opts.showHelp {
+		fmt.Println(colorize(colorYellow, programUsage))
+		os.Exit(0)
+	}
+	if opts.shouldExit {
+		os.Exit(0)
 	}
 
+	// start program
 	fmt.Println(colorize(colorYellow, logo))
 	fmt.Printf("\nEnter \"/h\" for help\n\n")
 
@@ -79,8 +80,17 @@ func main() {
 	userinput.CharLimit = 280
 	userinput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("221"))
 
-	m.userinput = userinput
-	m.vp = viewport.New(0, 0)
+	m := model{
+		l:          logger,
+		timeFormat: conf.TimeFormat,
+		taskSvc:    taskSvc,
+		cmdTimeout: 3 * time.Second,
+		userinput:  userinput,
+		vp:         viewport.New(0, 0),
+	}
+	if opts.firstTask.ID != 0 {
+		m.tasks = []Task{opts.firstTask}
+	}
 
 	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
@@ -107,4 +117,73 @@ func configLogger(level string, w io.Writer) *slog.Logger {
 	})
 
 	return slog.New(handler)
+}
+
+type options struct {
+	showHelp   bool
+	firstTask  Task
+	shouldExit bool
+}
+
+func parseProgramArgs(ctx context.Context, taskSvc TaskSvc) (options, error) {
+	var opts options
+
+	if len(os.Args) == 1 {
+		task, err := taskSvc.DequeueTask(ctx)
+		if err != nil {
+			return options{}, err
+		}
+
+		opts.firstTask.ExistingTaskRecord = task
+		return opts, nil
+	}
+
+	var cmd, arg string
+	if strings.HasPrefix(os.Args[1], "/") {
+		cmd = os.Args[1]
+		if len(os.Args) > 2 {
+			arg = strings.Join(os.Args[2:], " ")
+		}
+	} else {
+		arg = strings.Join(os.Args[1:], " ")
+	}
+
+	logger.Debug("parsed program args", "cmd", cmd, "arg", arg)
+	switch cmd {
+	case "/n", "":
+		if arg == "" {
+			task, err := taskSvc.DequeueTask(ctx)
+			if err != nil {
+				return options{}, err
+			}
+
+			opts.firstTask.ExistingTaskRecord = task
+			return opts, nil
+		}
+
+		task, err := taskSvc.StartTask(ctx, startTaskRequest{
+			Name: arg,
+		})
+		if err != nil {
+			return options{}, err
+		}
+		opts.firstTask.ExistingTaskRecord = task
+		return opts, nil
+	case "/a":
+		_, err := taskSvc.QueueTask(ctx, queueTaskRequest{
+			Name: arg,
+		})
+		if err != nil {
+			return options{}, err
+		}
+		fmt.Printf(`Queued up "%s"`+"\n", arg)
+		opts.shouldExit = true
+		return opts, nil
+	case "/review":
+		// TODO /review
+		panic("review command not implemented")
+	default:
+		opts.showHelp = true
+		return opts, nil
+	}
 }
