@@ -46,3 +46,4 @@ This is NOT a planner nor a calendar and should not be used for tasks that have 
 
 # Personal Notes
 - Phrase tasks to have a clear stopping point and limited scope
+- Make the last note a status (ex. "done and submitted hw!", "still need to clean the bathroom")
