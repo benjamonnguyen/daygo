@@ -3,15 +3,16 @@
 
 # Why?
 I need a system to...
-  1. offload TODOs onto "paper" to reduce cognitive load
-  2. keep me on track rather than bouncing from one unfinished TODO to another
-  3. block out time to prevent myself from hyper-focusing on one task at the expense of other priorities
+  1. offload TODOs from my brain onto "paper"
+  2. minimize decision points so I can just focus on completing the current TODO
+
+In other words, "Load 'em up and knock 'em out!"
 
 After several attempts at bespoke TODO apps, I think the crux of the problem is minimizing the number of decisions to be made.
 
-Priority levels, tags, and most features introduce more decision points and end up being counterproductive toward the ultimate goal of crossing tasks off of a list (ideally faster than it can grow).
+Priority levels, tags, and most features introduce more decision points which end up taking up a significant amount of mental energy. This makes them counterproductive toward the ultimate goal of crossing tasks off of a list (ideally faster than the list can grow).
 
-This is yet another experiment: a first-in-first-out task list.
+Daygo is yet another experiment: a first-in-first-out task list.
 
 Rather than being presented with the list, queued tasks are doled out one at a time in the order they were added.
 

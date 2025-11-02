@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 type InitMsg struct{}
@@ -31,6 +33,18 @@ type SkipTaskMsg struct {
 
 type DiscardPendingItemMsg struct {
 	id int
+}
+
+type HelpMsg struct {
+	content string
+}
+
+func displayHelp(content string) tea.Cmd {
+	return func() tea.Msg {
+		return HelpMsg{
+			content: content,
+		}
+	}
 }
 
 type ErrorMsg struct {

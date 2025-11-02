@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -28,6 +29,19 @@ const programUsage = `Usage:
   daygo <task>: start new task
   daygo /a <task>: add task to queue
   daygo /r [days_ago]: review tasks for date some number of days ago (default 0)`
+
+const commandHelp = `COMMANDS:
+  /n [task]: end current task and start a new one; if task is not provided, one will be dequeued
+  /k: skip current task
+  /x: discard current task or note
+
+  <note>: add a note to the current task
+  /a <task>: add task to the queue
+  /e <edit>: edit text of current item
+  /t <HHMM>: set a time to auto-end task
+`
+
+	var timeRe = regexp.MustCompile(`^(?:[01]\d|2[0-3])[0-5]\d$`)
 
 type model struct {
 	// children
@@ -67,6 +81,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case ErrorMsg:
 			m = m.addAlert(colorize(colorRed, msg.err.Error()))
 			return m, nil
+		case HelpMsg:
+			return m, nil
+			m = m.addAlert(colorize(colorYellow, msg.content))
 		case NewTaskMsg:
 			return m.handleNewTask(msg), nil
 		case NewNoteMsg:
@@ -106,7 +123,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// TODO consider a mutex to ignore input until state is consistent
 			switch msg.Type {
 			case tea.KeyEnter:
-				return m.handleInput()
+				m.alerts = nil
+				input := m.userinput.Value()
+				m.userinput.Reset()
+				if input == "" {
+					return m, nil
+				}
+
+				return m, m.handleInput(input)
 			case tea.KeyCtrlC:
 				return m.endProgram()
 			}
@@ -451,20 +475,6 @@ func (m model) discardLastPendingTaskItem() tea.Cmd {
 	}
 }
 
-func (m model) displayHelp() model {
-	const usage = `COMMANDS:
-  /n [task]: end current task and start a new one; if task is not provided, one will be dequeued
-  /k: skip current task
-  /x: discard current task or note
-
-  <note>: add a note to the current task
-  /a <task>: add task to the queue
-  /e <edit>: edit text of current item
-`
-	m = m.addAlert(colorize(colorYellow, usage))
-	return m
-}
-
 func (m model) skipPendingTask() tea.Cmd {
 	return func() tea.Msg {
 		t := m.currentTask()
@@ -524,41 +534,38 @@ func (m model) editPendingItem(edit string) tea.Cmd {
 	}
 }
 
-// TODO parseInput only return Cmd
-func (m model) handleInput() (model, tea.Cmd) {
-	m.alerts = nil
-	input := m.userinput.Value()
-	m.userinput.Reset()
-	if input == "" {
-		return m, nil
-	}
+func (m model) handleInput(input string) tea.Cmd {
 	if strings.HasPrefix(input, "/") {
 		parts := strings.SplitN(input, " ", 2)
 		switch parts[0] {
 		case "/n":
 			if len(parts) < 2 {
-				return m, m.startNextTask()
+				return m.startNextTask()
 			}
-			return m, m.startNewTask(parts[1])
+			return m.startNewTask(parts[1])
 		case "/x":
-			return m, m.discardLastPendingTaskItem()
+			return m.discardLastPendingTaskItem()
 		case "/h":
-			return m.displayHelp(), nil
+			return displayHelp(commandHelp)
 		case "/e":
 			if len(parts) < 2 {
-				m = m.addAlert(colorize(colorYellow, "usage: /e <edit>"))
-				return m, nil
+				return displayHelp("usage: /e <edit>")
 			}
-
-			return m, m.editPendingItem(parts[1])
+			return m.editPendingItem(parts[1])
 		case "/a":
 			if len(parts) < 2 {
-				m = m.addAlert(colorize(colorYellow, "usage: /a <task>"))
-				return m, nil
+				return displayHelp("usage: /a <task>")
 			}
-			return m, m.queueTask(parts[1])
+			return m.queueTask(parts[1])
 		case "/k":
-			return m, m.skipPendingTask()
+			return m.skipPendingTask()
+		case "/t":
+			if len(parts) < 2 {
+				return displayHelp("usage: /t <HHMM>")
+			}
+			endTime := parts[1]
+
+			if endTime != timeRe.Fin
 		}
 	}
 
