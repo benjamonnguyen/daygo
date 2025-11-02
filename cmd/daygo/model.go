@@ -27,7 +27,7 @@ const programUsage = `Usage:
   daygo: start next queued task
   daygo <task>: start new task
   daygo /a <task>: add task to queue
-  daygo /review [date]: review tasks and notes for target date; accepts date formats "DD-MM"/"DD-MM-YYYY" or number of days ago`
+  daygo /r [days_ago]: review tasks for date some number of days ago (default 0)`
 
 type model struct {
 	// children
@@ -71,11 +71,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleNewTask(msg), nil
 		case NewNoteMsg:
 			return m.handleNewNote(msg), nil
-		case QueueMsg:
+		case QueueTaskMsg:
 			alert := fmt.Sprintf(`Queued up "%s"`, msg.task)
 			m = m.addAlert(colorize(colorCyan, alert))
 			return m, nil
-		case SkipMsg:
+		case EditItemMsg:
+			return m.handleEditItem(msg), nil
+			return m, nil
+		case SkipTaskMsg:
 			task := m.currentTask()
 			if msg.id != task.ID {
 				panic("skip msg: out of sync")
@@ -85,7 +88,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.resizeViewport()
 			return m, m.startNextTask()
 		case DiscardPendingItemMsg:
-			return m.handleDiscardPendingItem(msg), nil
+			m = m.handleDiscardPendingItem(msg)
+			return m, nil
 		case tea.WindowSizeMsg:
 			m.h = msg.Height
 			m.userinput.Width = msg.Width
@@ -96,27 +100,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.vp.SetContent(m.renderVisibleTasks())
 			m.resizeViewport()
 			return m, nil
+		case EndProgramMsg:
+			return m.endProgram()
 		case tea.KeyMsg:
 			// TODO consider a mutex to ignore input until state is consistent
 			switch msg.Type {
 			case tea.KeyEnter:
 				return m.handleInput()
 			case tea.KeyCtrlC:
-				m.quitting = true
-				if t := m.currentTask(); t != nil {
-					t.IsTerminal = true
-					if t.IsPending() {
-						timeout, cancel := m.newTimeout()
-						defer cancel()
-						if err := m.endPendingTask(timeout); err != nil {
-							logger.Error(err.Error())
-						}
-						t.EndedAt = time.Now().Local()
-					}
-					m.vp.SetContent(m.renderVisibleTasks())
-					m.resizeViewport()
-				}
-				return m, tea.Quit
+				return m.endProgram()
 			}
 		}
 		return m, nil
@@ -132,6 +124,42 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(tiCmd, vpCmd, cmd)
+}
+
+func (m model) handleEditItem(msg EditItemMsg) model {
+	t := m.currentTask()
+	id := t.ID
+	n := t.LastNote()
+	if n != nil {
+		n.Name = msg.edit
+		id = n.ID
+	} else {
+		t.Name = msg.edit
+	}
+	if msg.id != id {
+		panic("skip msg: out of sync")
+	}
+	m.vp.SetContent(m.renderVisibleTasks())
+	m.resizeViewport()
+	return m
+}
+
+func (m model) endProgram() (model, tea.Cmd) {
+	m.quitting = true
+	if t := m.currentTask(); t != nil {
+		t.IsTerminal = true
+		if t.IsPending() {
+			timeout, cancel := m.newTimeout()
+			defer cancel()
+			if err := m.endPendingTask(timeout); err != nil {
+				logger.Error(err.Error())
+			}
+			t.EndedAt = time.Now().Local()
+		}
+		m.vp.SetContent(m.renderVisibleTasks())
+		m.resizeViewport()
+	}
+	return m, tea.Quit
 }
 
 func (m model) handleDiscardPendingItem(msg DiscardPendingItemMsg) model {
@@ -361,7 +389,7 @@ func (m model) queueTask(task string) tea.Cmd {
 				err: err,
 			}
 		}
-		return QueueMsg{
+		return QueueTaskMsg{
 			task: task,
 		}
 	}
@@ -431,8 +459,7 @@ func (m model) displayHelp() model {
 
   <note>: add a note to the current task
   /a <task>: add task to the queue
-  /r <task>: rename current task or note
-  /s: stash current task
+  /e <edit>: edit text of current item
 `
 	m = m.addAlert(colorize(colorYellow, usage))
 	return m
@@ -445,7 +472,7 @@ func (m model) skipPendingTask() tea.Cmd {
 			return errorMsg("no pending task to skip")
 		}
 		if len(t.Notes) > 0 {
-			return errorMsg("this task has been started - use /s to stash it instead")
+			return errorMsg("can't skip a completed task")
 		}
 
 		ctx, cancel := m.newTimeout()
@@ -465,8 +492,34 @@ func (m model) skipPendingTask() tea.Cmd {
 				err: err,
 			}
 		}
-		return SkipMsg{
+		return SkipTaskMsg{
 			id: t.ID,
+		}
+	}
+}
+
+func (m model) editPendingItem(edit string) tea.Cmd {
+	return func() tea.Msg {
+		timeout, cancel := m.newTimeout()
+		defer cancel()
+		t := m.currentTask()
+		if !t.IsPending() {
+			return errorMsg("no pending item to edit")
+		}
+		id := t.ID
+		if n := t.LastNote(); n != nil {
+			id = n.ID
+		}
+
+		if _, err := m.taskSvc.RenameTask(timeout, id, edit); err != nil {
+			return ErrorMsg{
+				err: err,
+			}
+		}
+
+		return EditItemMsg{
+			id:   id,
+			edit: edit,
 		}
 	}
 }
@@ -491,26 +544,21 @@ func (m model) handleInput() (model, tea.Cmd) {
 			return m, m.discardLastPendingTaskItem()
 		case "/h":
 			return m.displayHelp(), nil
-		case "/r":
-			// TODO /r rename
-			panic("rename not implemented")
-			// if len(parts) < 2 {
-			// 	return fmt.Errorf(`usage: /r <task>`)
-			// }
-			// return RenameTaskCommand{
-			// 	TaskName: parts[1],
-			// }, nil
+		case "/e":
+			if len(parts) < 2 {
+				m = m.addAlert(colorize(colorYellow, "usage: /e <edit>"))
+				return m, nil
+			}
+
+			return m, m.editPendingItem(parts[1])
 		case "/a":
 			if len(parts) < 2 {
-				m = m.addAlert("usage: /a <task>")
+				m = m.addAlert(colorize(colorYellow, "usage: /a <task>"))
 				return m, nil
 			}
 			return m, m.queueTask(parts[1])
 		case "/k":
 			return m, m.skipPendingTask()
-		case "/s":
-			// TODO /s stash
-			panic("stash not implemeneted")
 		}
 	}
 

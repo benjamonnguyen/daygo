@@ -6,6 +6,8 @@ import (
 
 type InitMsg struct{}
 
+type EndProgramMsg struct{}
+
 type NewTaskMsg struct {
 	task Task
 }
@@ -14,11 +16,16 @@ type NewNoteMsg struct {
 	note Note
 }
 
-type QueueMsg struct {
+type QueueTaskMsg struct {
 	task string
 }
 
-type SkipMsg struct {
+type EditItemMsg struct {
+	id   int
+	edit string
+}
+
+type SkipTaskMsg struct {
 	id int
 }
 
