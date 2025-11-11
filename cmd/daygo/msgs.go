@@ -35,14 +35,24 @@ type DiscardPendingItemMsg struct {
 	id int
 }
 
-type HelpMsg struct {
-	content string
+type AlertMsg struct {
+	message string
+	color   color
 }
 
-func displayHelp(content string) tea.Cmd {
+func displayHelp(message string) tea.Cmd {
+	return displayAlert(message, colorYellow)
+}
+
+func displayWarning(message string) tea.Cmd {
+	return displayAlert(message, colorRed)
+}
+
+func displayAlert(message string, color color) tea.Cmd {
 	return func() tea.Msg {
-		return HelpMsg{
-			content: content,
+		return AlertMsg{
+			message: message,
+			color:   color,
 		}
 	}
 }

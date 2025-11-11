@@ -75,68 +75,9 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var tiCmd, vpCmd, cmd tea.Cmd
 
-	// TODO extract
-	m, cmd = func() (model, tea.Cmd) {
-		switch msg := msg.(type) {
-		case ErrorMsg:
-			m = m.addAlert(colorize(colorRed, msg.err.Error()))
-			return m, nil
-		case HelpMsg:
-			return m, nil
-			m = m.addAlert(colorize(colorYellow, msg.content))
-		case NewTaskMsg:
-			return m.handleNewTask(msg), nil
-		case NewNoteMsg:
-			return m.handleNewNote(msg), nil
-		case QueueTaskMsg:
-			alert := fmt.Sprintf(`Queued up "%s"`, msg.task)
-			m = m.addAlert(colorize(colorCyan, alert))
-			return m, nil
-		case EditItemMsg:
-			return m.handleEditItem(msg), nil
-			return m, nil
-		case SkipTaskMsg:
-			task := m.currentTask()
-			if msg.id != task.ID {
-				panic("skip msg: out of sync")
-			}
-			m.tasks = m.tasks[:len(m.tasks)-1]
-			m.vp.SetContent(m.renderVisibleTasks())
-			m.resizeViewport()
-			return m, m.startNextTask()
-		case DiscardPendingItemMsg:
-			m = m.handleDiscardPendingItem(msg)
-			return m, nil
-		case tea.WindowSizeMsg:
-			m.h = msg.Height
-			m.userinput.Width = msg.Width
-			m.vp.Width = msg.Width
-			m.resizeViewport()
-			return m, nil
-		case InitMsg:
-			m.vp.SetContent(m.renderVisibleTasks())
-			m.resizeViewport()
-			return m, nil
-		case EndProgramMsg:
-			return m.endProgram()
-		case tea.KeyMsg:
-			// TODO consider a mutex to ignore input until state is consistent
-			switch msg.Type {
-			case tea.KeyEnter:
-				m.alerts = nil
-				input := m.userinput.Value()
-				m.userinput.Reset()
-				if input == "" {
-					return m, nil
-				}
+	m, cmd = m.updateParent(msg)
 
-				return m, m.handleInput(input)
-			case tea.KeyCtrlC:
-				return m.endProgram()
-			}
-		}
-		return m, nil
-	}()
+	// update children
 
 	m.userinput, tiCmd = m.userinput.Update(msg)
 
@@ -148,6 +89,72 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(tiCmd, vpCmd, cmd)
+}
+
+func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case ErrorMsg:
+		// TODO replace with displayAlert and use ErrorMsg for fatal errors
+		m = m.addAlert(colorize(colorRed, msg.err.Error()))
+		return m, nil
+	case AlertMsg:
+		if msg.color != colorNone {
+			m.addAlert(colorize(msg.color, msg.message))
+		} else {
+			m.addAlert(msg.message)
+		}
+		return m, nil
+	case NewTaskMsg:
+		return m.handleNewTask(msg), nil
+	case NewNoteMsg:
+		return m.handleNewNote(msg), nil
+	case QueueTaskMsg:
+		alert := fmt.Sprintf(`Queued up "%s"`, msg.task)
+		m = m.addAlert(colorize(colorCyan, alert))
+		return m, nil
+	case EditItemMsg:
+		return m.handleEditItem(msg), nil
+	case SkipTaskMsg:
+		task := m.currentTask()
+		if msg.id != task.ID {
+			panic("skip msg: out of sync")
+		}
+		m.tasks = m.tasks[:len(m.tasks)-1]
+		m.vp.SetContent(m.renderVisibleTasks())
+		m.resizeViewport()
+		return m, m.startNextTask()
+	case DiscardPendingItemMsg:
+		m = m.handleDiscardPendingItem(msg)
+		return m, nil
+	case tea.WindowSizeMsg:
+		m.h = msg.Height
+		m.userinput.Width = msg.Width
+		m.vp.Width = msg.Width
+		m.resizeViewport()
+		return m, nil
+	case InitMsg:
+		m.vp.SetContent(m.renderVisibleTasks())
+		m.resizeViewport()
+		return m, nil
+	case EndProgramMsg:
+		return m.endProgram()
+	case tea.KeyMsg:
+		// TODO consider a mutex to ignore input until state is consistent
+		switch msg.Type {
+		case tea.KeyEnter:
+			m.alerts = nil
+			input := m.userinput.Value()
+			m.userinput.Reset()
+			if input == "" {
+				return m, nil
+			}
+
+			return m, m.handleInput(input)
+		case tea.KeyCtrlC:
+			return m.endProgram()
+		}
+	}
+	return m, nil
 }
 
 func (m model) handleEditItem(msg EditItemMsg) model {
@@ -570,7 +577,7 @@ func (m model) handleInput(input string) tea.Cmd {
 	}
 
 	if !m.currentTask().IsPending() {
-		return m, m.startNewTask(input)
+		return m.startNewTask(input)
 	}
-	return m, m.addNote(input)
+	return m.addNote(input)
 }
