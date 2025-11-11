@@ -11,6 +11,7 @@ import (
 
 	"github.com/benjamonnguyen/daygo"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/timer"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -47,6 +48,7 @@ type model struct {
 	// children
 	vp        viewport.Model
 	userinput textinput.Model
+	tbTimer   timeBlockTimer
 
 	// supplied
 	l       *slog.Logger
@@ -63,8 +65,6 @@ type model struct {
 	timeFormat string
 }
 
-var _ tea.Model = (*model)(nil)
-
 func (m model) Init() tea.Cmd {
 	init := func() tea.Msg {
 		return InitMsg{}
@@ -73,13 +73,14 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var tiCmd, vpCmd, cmd tea.Cmd
+	var tiCmd, vpCmd, tbCmd, cmd tea.Cmd
 
 	m, cmd = m.updateParent(msg)
 
 	// update children
 
 	m.userinput, tiCmd = m.userinput.Update(msg)
+	m.tbTimer.Model, tbCmd = m.tbTimer.Update(msg)
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -88,7 +89,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vp, vpCmd = m.vp.Update(msg)
 	}
 
-	return m, tea.Batch(tiCmd, vpCmd, cmd)
+	return m, tea.Batch(tiCmd, vpCmd, cmd, tbCmd)
 }
 
 func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
@@ -98,9 +99,9 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 		return m, tea.Quit
 	case AlertMsg:
 		if msg.color != colorNone {
-			m.addAlert(colorize(msg.color, msg.message))
+			m = m.addAlert(colorize(msg.color, msg.message))
 		} else {
-			m.addAlert(msg.message)
+			m = m.addAlert(msg.message)
 		}
 		return m, nil
 	case NewTaskMsg:
@@ -124,6 +125,39 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 		return m, m.startNextTask()
 	case DiscardPendingItemMsg:
 		m = m.handleDiscardPendingItem(msg)
+		return m, nil
+	case EndPendingTaskMsg:
+		task := m.currentTask()
+		if msg.id != task.ID {
+			panic("EndPendingTaskMsg out of sync")
+		}
+		if !task.IsPending() {
+			return m, nil
+		}
+		task.EndedAt = time.Now()
+		m.vp.SetContent(m.renderVisibleTasks())
+		m.resizeViewport()
+		return m, nil
+	case TimeBlockMsg:
+		task := m.currentTask()
+		if msg.id != task.ID {
+			panic("TimeBlockMsg out of sync")
+		}
+		m.tbTimer.Model = timer.New(msg.duration)
+		return m, tea.Batch(m.tbTimer.Init())
+	case timer.TimeoutMsg:
+		if msg.ID == m.tbTimer.ID() {
+			return m, func() tea.Msg {
+				timeout, cancel := m.newTimeout()
+				defer cancel()
+				if err := m.endPendingTask(timeout); err != nil {
+					return displayWarning(err.Error())
+				}
+				return EndPendingTaskMsg{
+					id: m.currentTask().ID,
+				}
+			}
+		}
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.h = msg.Height
@@ -221,7 +255,11 @@ func (m model) footerHeight() int {
 		return 1
 	}
 	// TODO magicnumber
-	return 4 + len(m.alerts)
+	h := 6
+	if m.tbTimer.Timedout() {
+		h += len(m.alerts)
+	}
+	return h
 }
 
 func (m model) View() string {
@@ -236,7 +274,9 @@ func (m model) View() string {
 	if !m.quitting {
 		footer.WriteString(m.userinput.View())
 		footer.WriteString("\n\n")
-		if len(m.alerts) > 0 {
+		if !m.tbTimer.Timedout() {
+			footer.WriteString(m.tbTimer.View())
+		} else if len(m.alerts) > 0 {
 			footer.WriteString(strings.Join(m.alerts, "\n"))
 		} else {
 			footer.WriteString(faintStyle.Render("(ctrl+c to quit)"))
@@ -331,6 +371,7 @@ func (m model) renderVisibleTasks() string {
 }
 
 func (m model) handleNewTask(msg NewTaskMsg) model {
+	m.tbTimer.Timeout = 0
 	if t := m.currentTask(); t.IsPending() {
 		t.EndedAt = msg.task.StartedAt
 		if n := t.LastNote(); n != nil {
@@ -516,6 +557,30 @@ func (m model) editPendingItem(edit string) tea.Cmd {
 	}
 }
 
+func (m model) timeBlockPendingTask(arg string) tea.Cmd {
+	return func() tea.Msg {
+		if !timeRe.MatchString(arg) {
+			return displayHelp("usage: /t <HHMM>")
+		}
+		task := m.currentTask()
+		if !task.IsPending() {
+			return displayWarning("no pending task to time block")
+		}
+		now, _ := time.Parse("1504", time.Now().Format("1504"))
+		endTime, _ := time.Parse("1504", arg)
+
+		logger.Debug("timeblockpendingtask", "endtime", endTime.String(), "now", now.String())
+		if endTime.Compare(now) < 0 {
+			endTime = endTime.Add(12 * time.Hour)
+		}
+
+		return TimeBlockMsg{
+			id:       task.ID,
+			duration: endTime.Sub(now),
+		}
+	}
+}
+
 func (m model) handleInput(input string) tea.Cmd {
 	if strings.HasPrefix(input, "/") {
 		parts := strings.SplitN(input, " ", 2)
@@ -545,10 +610,7 @@ func (m model) handleInput(input string) tea.Cmd {
 			if len(parts) < 2 {
 				return displayHelp("usage: /t <HHMM>")
 			}
-			// TODO impl /t
-			// endTime := parts[1]
-
-			// if endTime != timeRe.Fin
+			return m.timeBlockPendingTask(parts[1])
 		}
 	}
 
