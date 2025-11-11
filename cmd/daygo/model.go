@@ -41,7 +41,7 @@ const commandHelp = `COMMANDS:
   /t <HHMM>: set a time to auto-end task
 `
 
-	var timeRe = regexp.MustCompile(`^(?:[01]\d|2[0-3])[0-5]\d$`)
+var timeRe = regexp.MustCompile(`^(?:[01]\d|2[0-3])[0-5]\d$`)
 
 type model struct {
 	// children
@@ -94,9 +94,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ErrorMsg:
-		// TODO replace with displayAlert and use ErrorMsg for fatal errors
 		m = m.addAlert(colorize(colorRed, msg.err.Error()))
-		return m, nil
+		return m, tea.Quit
 	case AlertMsg:
 		if msg.color != colorNone {
 			m.addAlert(colorize(msg.color, msg.message))
@@ -351,27 +350,21 @@ func (m model) startNextTask() tea.Cmd {
 
 		task, err := m.taskSvc.PeekNextTask(ctx)
 		if err != nil {
-			return ErrorMsg{
-				err: err,
-			}
+			return displayWarning(err.Error())
 		}
 		if task == (daygo.ExistingTaskRecord{}) {
-			return errorMsg("task queue is empty!")
+			return displayWarning("task queue is empty!")
 		}
 
 		if err := m.endPendingTask(ctx); err != nil {
-			return ErrorMsg{
-				err: err,
-			}
+			return displayWarning(err.Error())
 		}
 
 		task, err = m.taskSvc.StartTask(ctx, startTaskRequest{
 			ID: task.ID,
 		})
 		if err != nil {
-			return ErrorMsg{
-				err: err,
-			}
+			return displayWarning(err.Error())
 		}
 
 		return NewTaskMsg{
@@ -388,17 +381,13 @@ func (m model) startNewTask(task string) tea.Cmd {
 		defer cancel()
 
 		if err := m.endPendingTask(ctx); err != nil {
-			return ErrorMsg{
-				err: err,
-			}
+			return displayWarning(err.Error())
 		}
 		task, err := m.taskSvc.StartTask(ctx, startTaskRequest{
 			Name: task,
 		})
 		if err != nil {
-			return ErrorMsg{
-				err: err,
-			}
+			return displayWarning(err.Error())
 		}
 		return NewTaskMsg{
 			task: Task{
@@ -416,9 +405,7 @@ func (m model) queueTask(task string) tea.Cmd {
 		if _, err := m.taskSvc.QueueTask(ctx, queueTaskRequest{
 			Name: task,
 		}); err != nil {
-			return ErrorMsg{
-				err: err,
-			}
+			return displayWarning(err.Error())
 		}
 		return QueueTaskMsg{
 			task: task,
@@ -432,9 +419,7 @@ func (m model) addNote(note string) tea.Cmd {
 		defer cancel()
 
 		if err := m.endPendingNote(ctx); err != nil {
-			return ErrorMsg{
-				err: err,
-			}
+			return displayWarning(err.Error())
 		}
 
 		note, err := m.taskSvc.StartTask(ctx, startTaskRequest{
@@ -442,9 +427,7 @@ func (m model) addNote(note string) tea.Cmd {
 			ParentID: m.currentTask().ID,
 		})
 		if err != nil {
-			return ErrorMsg{
-				err: err,
-			}
+			return displayWarning(err.Error())
 		}
 
 		return NewNoteMsg{
@@ -459,11 +442,11 @@ func (m model) discardLastPendingTaskItem() tea.Cmd {
 		defer cancel()
 
 		if len(m.tasks) == 0 {
-			return errorMsg("nothing left to discard")
+			return displayWarning("nothing left to discard")
 		}
 		currentTask := m.currentTask()
 		if !currentTask.IsPending() {
-			return errorMsg("can't discard completed task")
+			return displayWarning("can't discard completed task")
 		}
 
 		lastItemID := currentTask.ID
@@ -472,9 +455,7 @@ func (m model) discardLastPendingTaskItem() tea.Cmd {
 		}
 
 		if _, err := m.taskSvc.DiscardTask(ctx, lastItemID); err != nil {
-			return ErrorMsg{
-				err: err,
-			}
+			return displayWarning(err.Error())
 		}
 		return DiscardPendingItemMsg{
 			id: lastItemID,
@@ -486,10 +467,10 @@ func (m model) skipPendingTask() tea.Cmd {
 	return func() tea.Msg {
 		t := m.currentTask()
 		if !t.IsPending() {
-			return errorMsg("no pending task to skip")
+			return displayWarning("no pending task to skip")
 		}
 		if len(t.Notes) > 0 {
-			return errorMsg("can't skip a completed task")
+			return displayWarning("can't skip a completed task")
 		}
 
 		ctx, cancel := m.newTimeout()
@@ -497,17 +478,13 @@ func (m model) skipPendingTask() tea.Cmd {
 
 		next, err := m.taskSvc.PeekNextTask(ctx)
 		if err != nil {
-			return ErrorMsg{
-				err: err,
-			}
+			return displayWarning(err.Error())
 		}
 		if next == (daygo.ExistingTaskRecord{}) {
-			return errorMsg("task queue is empty")
+			return displayWarning("task queue is empty")
 		}
 		if err := m.taskSvc.SkipTask(ctx, t.ID); err != nil {
-			return ErrorMsg{
-				err: err,
-			}
+			return displayWarning(err.Error())
 		}
 		return SkipTaskMsg{
 			id: t.ID,
@@ -521,7 +498,7 @@ func (m model) editPendingItem(edit string) tea.Cmd {
 		defer cancel()
 		t := m.currentTask()
 		if !t.IsPending() {
-			return errorMsg("no pending item to edit")
+			return displayWarning("no pending item to edit")
 		}
 		id := t.ID
 		if n := t.LastNote(); n != nil {
@@ -529,9 +506,7 @@ func (m model) editPendingItem(edit string) tea.Cmd {
 		}
 
 		if _, err := m.taskSvc.RenameTask(timeout, id, edit); err != nil {
-			return ErrorMsg{
-				err: err,
-			}
+			return displayWarning(err.Error())
 		}
 
 		return EditItemMsg{
@@ -570,9 +545,10 @@ func (m model) handleInput(input string) tea.Cmd {
 			if len(parts) < 2 {
 				return displayHelp("usage: /t <HHMM>")
 			}
-			endTime := parts[1]
+			// TODO impl /t
+			// endTime := parts[1]
 
-			if endTime != timeRe.Fin
+			// if endTime != timeRe.Fin
 		}
 	}
 

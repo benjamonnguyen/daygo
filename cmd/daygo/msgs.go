@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -59,10 +57,4 @@ func displayAlert(message string, color color) tea.Cmd {
 
 type ErrorMsg struct {
 	err error
-}
-
-func errorMsg(format string, args ...any) ErrorMsg {
-	return ErrorMsg{
-		err: fmt.Errorf(format, args...),
-	}
 }
