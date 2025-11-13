@@ -4,15 +4,15 @@
 # Why?
 I need a system to...
   1. offload TODOs from my brain onto "paper"
-  2. minimize decision points so I can just focus on completing the current TODO
+  2. minimize decision points so I can just focus on completing TODOs one after another
 
 In other words, "Load 'em up and knock 'em out!"
 
-After several attempts at bespoke TODO apps, I think the crux of the problem is minimizing the number of decisions to be made.
+After several attempts at bespoke TODO apps, I think the main failing is burdening the user (aka me) with too many decisions.
 
-Priority levels, tags, and most features introduce more decision points which end up taking up a significant amount of mental energy. This makes them counterproductive toward the ultimate goal of crossing tasks off of a list (ideally faster than the list can grow).
+The ability to set priority levels and tags requires the user to make additional decisions when adding tasks and again when selecting their next task. This takes up a significant amount of mental energy, making these features counterproductive toward the ultimate goal of getting things done.
 
-Daygo is yet another experiment: a first-in-first-out task list.
+DayGo is yet another experiment: a first-in-first-out task list.
 
 Rather than being presented with the list, queued tasks are doled out one at a time in the order they were added.
 
@@ -45,3 +45,4 @@ What this tool is NOT meant to be is a planner or calendar and should not be use
 # Personal Notes
 - Phrase tasks to have a clear stopping point and limited scope
 - End tasks with status note (ex. "submitted assignment", "blocked on concurrency bug")
+- An exception to the goal of minimizing features is the `/t <end_time>` command. I've found time blocking an effective countermeasure to my tendency to hyper-focus on a task at the expense of other priorities. This also allows ending a task at a predetermined time while AFK.

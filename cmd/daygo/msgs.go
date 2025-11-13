@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -35,24 +35,41 @@ type DiscardPendingItemMsg struct {
 	id int
 }
 
-type HelpMsg struct {
-	content string
+type EndPendingTaskMsg struct {
+	id int
 }
 
-func displayHelp(content string) tea.Cmd {
+type TimeBlockMsg struct {
+	id       int
+	duration time.Duration
+}
+
+type AlertMsg struct {
+	message string
+	color   color
+}
+
+func displayHelp(message string) tea.Cmd {
+	return displayAlert(message, colorYellow)
+}
+
+func displayWarning(message string) tea.Cmd {
+	return displayAlert(message, colorRed)
+}
+
+func displayInfo(message string) tea.Cmd {
+	return displayAlert(message, colorCyan)
+}
+
+func displayAlert(message string, color color) tea.Cmd {
 	return func() tea.Msg {
-		return HelpMsg{
-			content: content,
+		return AlertMsg{
+			message: message,
+			color:   color,
 		}
 	}
 }
 
 type ErrorMsg struct {
 	err error
-}
-
-func errorMsg(format string, args ...any) ErrorMsg {
-	return ErrorMsg{
-		err: fmt.Errorf(format, args...),
-	}
 }
