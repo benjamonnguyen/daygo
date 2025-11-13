@@ -12,7 +12,7 @@ import (
 type TaskSvc interface {
 	StartTask(context.Context, startTaskRequest) (daygo.ExistingTaskRecord, error)
 	EndTask(ctx context.Context, id int) (daygo.ExistingTaskRecord, error)
-	DiscardTask(ctx context.Context, id int) ([]daygo.ExistingTaskRecord, error)
+	DeleteTask(ctx context.Context, id int) ([]daygo.ExistingTaskRecord, error)
 	RenameTask(ctx context.Context, id int, newName string) (daygo.ExistingTaskRecord, error)
 	DequeueTask(ctx context.Context) (daygo.ExistingTaskRecord, error)
 	QueueTask(context.Context, queueTaskRequest) (daygo.ExistingTaskRecord, error)
@@ -62,7 +62,7 @@ func (t Task) Render(timeFormat string) (string, int) {
 	}
 	lines = append(lines, notes...)
 	if t.IsTerminal {
-		endTime := time.Now().Local().Format(timeFormat)
+		endTime := t.EndedAt.Format(timeFormat)
 		lines = append(lines, fmt.Sprintf(
 			"[%s] %s%c",
 			endTime,
@@ -139,7 +139,7 @@ func (s *taskSvc) EndTask(ctx context.Context, id int) (daygo.ExistingTaskRecord
 	})
 }
 
-func (s *taskSvc) DiscardTask(ctx context.Context, id int) ([]daygo.ExistingTaskRecord, error) {
+func (s *taskSvc) DeleteTask(ctx context.Context, id int) ([]daygo.ExistingTaskRecord, error) {
 	res, err := s.repo.DeleteTasks(ctx, []any{id})
 	if err != nil {
 		return nil, err

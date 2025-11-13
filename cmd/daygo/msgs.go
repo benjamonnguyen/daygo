@@ -8,7 +8,9 @@ import (
 
 type InitMsg struct{}
 
-type EndProgramMsg struct{}
+type EndProgramMsg struct {
+	discardPendingTask bool
+}
 
 type NewTaskMsg struct {
 	task Task
@@ -31,7 +33,7 @@ type SkipTaskMsg struct {
 	id int
 }
 
-type DiscardPendingItemMsg struct {
+type DeletePendingItemMsg struct {
 	id int
 }
 

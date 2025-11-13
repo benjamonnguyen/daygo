@@ -34,12 +34,14 @@ const programUsage = `Usage:
 const commandHelp = `COMMANDS:
   /n [task]: end current task and start a new one; if task is not provided, one will be dequeued
   /k: skip current task
-  /x: discard current task or note
+  /x: delete current task or note
 
   <note>: add a note to the current task
   /a <task>: add task to the queue
   /e <edit>: edit text of current item
   /t <HHMM>: set a time to auto-end task
+
+	/o: end program without saving
 `
 
 var timeRe = regexp.MustCompile(`^(?:[01]\d|2[0-3])[0-5]\d$`)
@@ -123,8 +125,8 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 		m.vp.SetContent(m.renderVisibleTasks())
 		m.resizeViewport()
 		return m, m.startNextTask()
-	case DiscardPendingItemMsg:
-		m = m.handleDiscardPendingItem(msg)
+	case DeletePendingItemMsg:
+		m = m.handleDeletePendingItem(msg)
 		return m, nil
 	case EndPendingTaskMsg:
 		task := m.currentTask()
@@ -170,7 +172,7 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 		m.resizeViewport()
 		return m, nil
 	case EndProgramMsg:
-		return m.endProgram()
+		return m.endProgram(msg.discardPendingTask)
 	case tea.KeyMsg:
 		// TODO consider a mutex to ignore input until state is consistent
 		switch msg.Type {
@@ -184,7 +186,7 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 
 			return m, m.handleInput(input)
 		case tea.KeyCtrlC:
-			return m.endProgram()
+			return m.endProgram(false)
 		}
 	}
 	return m, nil
@@ -208,8 +210,11 @@ func (m model) handleEditItem(msg EditItemMsg) model {
 	return m
 }
 
-func (m model) endProgram() (model, tea.Cmd) {
+func (m model) endProgram(discardPendingTask bool) (model, tea.Cmd) {
 	m.quitting = true
+	if discardPendingTask && len(m.tasks) > 0 {
+		m.tasks = m.tasks[:len(m.tasks)-1]
+	}
 	if t := m.currentTask(); t != nil {
 		t.IsTerminal = true
 		if t.IsPending() {
@@ -226,21 +231,21 @@ func (m model) endProgram() (model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-func (m model) handleDiscardPendingItem(msg DiscardPendingItemMsg) model {
+func (m model) handleDeletePendingItem(msg DeletePendingItemMsg) model {
 	t := m.currentTask()
 	if !t.IsPending() {
-		panic("discardPendingItemMsg: out of sync")
+		panic("deletePendingItemMsg: out of sync")
 	}
 	if len(t.Notes) > 0 {
 		if n := t.LastNote(); n == nil || n.ID != msg.id {
-			panic("discardPendingItemMsg: out of sync")
+			panic("deletePendingItemMsg: out of sync")
 		}
 		t.Notes = t.Notes[:len(t.Notes)-1]
 		m.vp.SetContent(m.renderVisibleTasks())
 		m.resizeViewport()
 	} else {
 		if t.ID != msg.id {
-			panic("discardPendingItemMsg: out of sync")
+			panic("deletePendingItemMsg: out of sync")
 		}
 		m.tasks = m.tasks[:len(m.tasks)-1]
 		m.vp.SetContent(m.renderVisibleTasks())
@@ -477,17 +482,17 @@ func (m model) addNote(note string) tea.Cmd {
 	}
 }
 
-func (m model) discardLastPendingTaskItem() tea.Cmd {
+func (m model) deleteLastPendingTaskItem() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := m.newTimeout()
 		defer cancel()
 
 		if len(m.tasks) == 0 {
-			return displayWarning("nothing left to discard")
+			return warningAlert("nothing left to delete")
 		}
 		currentTask := m.currentTask()
 		if !currentTask.IsPending() {
-			return displayWarning("can't discard completed task")
+			return warningAlert("can't delete completed task")
 		}
 
 		lastItemID := currentTask.ID
@@ -495,10 +500,10 @@ func (m model) discardLastPendingTaskItem() tea.Cmd {
 			lastItemID = n.ID
 		}
 
-		if _, err := m.taskSvc.DiscardTask(ctx, lastItemID); err != nil {
-			return displayWarning(err.Error())
+		if _, err := m.taskSvc.DeleteTask(ctx, lastItemID); err != nil {
+			return warningAlert(err.Error())
 		}
-		return DiscardPendingItemMsg{
+		return DeletePendingItemMsg{
 			id: lastItemID,
 		}
 	}
@@ -591,7 +596,7 @@ func (m model) handleInput(input string) tea.Cmd {
 			}
 			return m.startNewTask(parts[1])
 		case "/x":
-			return m.discardLastPendingTaskItem()
+			return m.deleteLastPendingTaskItem()
 		case "/h":
 			return displayHelp(commandHelp)
 		case "/e":
@@ -611,6 +616,12 @@ func (m model) handleInput(input string) tea.Cmd {
 				return displayHelp("usage: /t <HHMM>")
 			}
 			return m.timeBlockPendingTask(parts[1])
+		case "/o":
+			return func() tea.Msg {
+				return EndProgramMsg{
+					discardPendingTask: true,
+				}
+			}
 		}
 	}
 
