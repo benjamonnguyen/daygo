@@ -51,24 +51,22 @@ type AlertMsg struct {
 	color   color
 }
 
-func displayHelp(message string) tea.Cmd {
-	return displayAlert(message, colorYellow)
+func helpAlert(message string) tea.Msg {
+	return alert(message, colorYellow)
 }
 
-func displayWarning(message string) tea.Cmd {
-	return displayAlert(message, colorRed)
+func warningAlert(message string) tea.Msg {
+	return alert(message, colorRed)
 }
 
-func displayInfo(message string) tea.Cmd {
-	return displayAlert(message, colorCyan)
+func infoAlert(message string) tea.Msg {
+	return alert(message, colorCyan)
 }
 
-func displayAlert(message string, color color) tea.Cmd {
-	return func() tea.Msg {
-		return AlertMsg{
-			message: message,
-			color:   color,
-		}
+func alert(message string, color color) tea.Msg {
+	return AlertMsg{
+		message: message,
+		color:   color,
 	}
 }
 

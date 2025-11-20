@@ -153,7 +153,7 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 				timeout, cancel := m.newTimeout()
 				defer cancel()
 				if err := m.endPendingTask(timeout); err != nil {
-					return displayWarning(err.Error())
+					return warningAlert(err.Error())
 				}
 				return EndPendingTaskMsg{
 					id: m.currentTask().ID,
@@ -174,16 +174,15 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 	case EndProgramMsg:
 		return m.endProgram(msg.discardPendingTask)
 	case tea.KeyMsg:
-		// TODO consider a mutex to ignore input until state is consistent
 		switch msg.Type {
 		case tea.KeyEnter:
-			m.alerts = nil
 			input := m.userinput.Value()
 			m.userinput.Reset()
 			if input == "" {
 				return m, nil
 			}
 
+			m.alerts = nil
 			return m, m.handleInput(input)
 		case tea.KeyCtrlC:
 			return m.endProgram(false)
@@ -260,10 +259,7 @@ func (m model) footerHeight() int {
 		return 1
 	}
 	// TODO magicnumber
-	h := 6
-	if m.tbTimer.Timedout() {
-		h += len(m.alerts)
-	}
+	h := 6 + len(m.alerts)
 	return h
 }
 
@@ -279,14 +275,24 @@ func (m model) View() string {
 	if !m.quitting {
 		footer.WriteString(m.userinput.View())
 		footer.WriteString("\n\n")
+
+		showQuit := true
 		if !m.tbTimer.Timedout() {
 			footer.WriteString(m.tbTimer.View())
-		} else if len(m.alerts) > 0 {
-			footer.WriteString(strings.Join(m.alerts, "\n"))
-		} else {
-			footer.WriteString(faintStyle.Render("(ctrl+c to quit)"))
+			footer.WriteRune('\n')
+			showQuit = false
 		}
-		footer.WriteRune('\n')
+
+		if len(m.alerts) > 0 {
+			footer.WriteString(strings.Join(m.alerts, "\n"))
+			footer.WriteRune('\n')
+			showQuit = false
+		}
+
+		if showQuit {
+			footer.WriteString(faintStyle.Render("(ctrl+c to quit)"))
+			footer.WriteRune('\n')
+		}
 	}
 
 	return lipgloss.JoinVertical(0, content.String(), footer.String())
@@ -396,21 +402,21 @@ func (m model) startNextTask() tea.Cmd {
 
 		task, err := m.taskSvc.PeekNextTask(ctx)
 		if err != nil {
-			return displayWarning(err.Error())
+			return warningAlert(err.Error())
 		}
 		if task == (daygo.ExistingTaskRecord{}) {
-			return displayWarning("task queue is empty!")
+			return warningAlert("task queue is empty!")
 		}
 
 		if err := m.endPendingTask(ctx); err != nil {
-			return displayWarning(err.Error())
+			return warningAlert(err.Error())
 		}
 
 		task, err = m.taskSvc.StartTask(ctx, startTaskRequest{
 			ID: task.ID,
 		})
 		if err != nil {
-			return displayWarning(err.Error())
+			return warningAlert(err.Error())
 		}
 
 		return NewTaskMsg{
@@ -427,13 +433,13 @@ func (m model) startNewTask(task string) tea.Cmd {
 		defer cancel()
 
 		if err := m.endPendingTask(ctx); err != nil {
-			return displayWarning(err.Error())
+			return warningAlert(err.Error())
 		}
 		task, err := m.taskSvc.StartTask(ctx, startTaskRequest{
 			Name: task,
 		})
 		if err != nil {
-			return displayWarning(err.Error())
+			return warningAlert(err.Error())
 		}
 		return NewTaskMsg{
 			task: Task{
@@ -451,7 +457,7 @@ func (m model) queueTask(task string) tea.Cmd {
 		if _, err := m.taskSvc.QueueTask(ctx, queueTaskRequest{
 			Name: task,
 		}); err != nil {
-			return displayWarning(err.Error())
+			return warningAlert(err.Error())
 		}
 		return QueueTaskMsg{
 			task: task,
@@ -465,7 +471,7 @@ func (m model) addNote(note string) tea.Cmd {
 		defer cancel()
 
 		if err := m.endPendingNote(ctx); err != nil {
-			return displayWarning(err.Error())
+			return warningAlert(err.Error())
 		}
 
 		note, err := m.taskSvc.StartTask(ctx, startTaskRequest{
@@ -473,7 +479,7 @@ func (m model) addNote(note string) tea.Cmd {
 			ParentID: m.currentTask().ID,
 		})
 		if err != nil {
-			return displayWarning(err.Error())
+			return warningAlert(err.Error())
 		}
 
 		return NewNoteMsg{
@@ -488,11 +494,11 @@ func (m model) deleteLastPendingTaskItem() tea.Cmd {
 		defer cancel()
 
 		if len(m.tasks) == 0 {
-			return warningAlert("nothing left to delete")
+			return warningAlert("nothing left to discard")
 		}
 		currentTask := m.currentTask()
 		if !currentTask.IsPending() {
-			return warningAlert("can't delete completed task")
+			return warningAlert("can't discard completed task")
 		}
 
 		lastItemID := currentTask.ID
@@ -500,7 +506,7 @@ func (m model) deleteLastPendingTaskItem() tea.Cmd {
 			lastItemID = n.ID
 		}
 
-		if _, err := m.taskSvc.DeleteTask(ctx, lastItemID); err != nil {
+		if _, err := m.taskSvc.DiscardTask(ctx, lastItemID); err != nil {
 			return warningAlert(err.Error())
 		}
 		return DeletePendingItemMsg{
@@ -513,10 +519,10 @@ func (m model) skipPendingTask() tea.Cmd {
 	return func() tea.Msg {
 		t := m.currentTask()
 		if !t.IsPending() {
-			return displayWarning("no pending task to skip")
+			return warningAlert("no pending task to skip")
 		}
 		if len(t.Notes) > 0 {
-			return displayWarning("can't skip a completed task")
+			return warningAlert("can't skip a completed task")
 		}
 
 		ctx, cancel := m.newTimeout()
@@ -524,13 +530,13 @@ func (m model) skipPendingTask() tea.Cmd {
 
 		next, err := m.taskSvc.PeekNextTask(ctx)
 		if err != nil {
-			return displayWarning(err.Error())
+			return warningAlert(err.Error())
 		}
 		if next == (daygo.ExistingTaskRecord{}) {
-			return displayWarning("task queue is empty")
+			return warningAlert("task queue is empty")
 		}
 		if err := m.taskSvc.SkipTask(ctx, t.ID); err != nil {
-			return displayWarning(err.Error())
+			return warningAlert(err.Error())
 		}
 		return SkipTaskMsg{
 			id: t.ID,
@@ -544,7 +550,7 @@ func (m model) editPendingItem(edit string) tea.Cmd {
 		defer cancel()
 		t := m.currentTask()
 		if !t.IsPending() {
-			return displayWarning("no pending item to edit")
+			return warningAlert("no pending item to edit")
 		}
 		id := t.ID
 		if n := t.LastNote(); n != nil {
@@ -552,7 +558,7 @@ func (m model) editPendingItem(edit string) tea.Cmd {
 		}
 
 		if _, err := m.taskSvc.RenameTask(timeout, id, edit); err != nil {
-			return displayWarning(err.Error())
+			return warningAlert(err.Error())
 		}
 
 		return EditItemMsg{
@@ -565,11 +571,11 @@ func (m model) editPendingItem(edit string) tea.Cmd {
 func (m model) timeBlockPendingTask(arg string) tea.Cmd {
 	return func() tea.Msg {
 		if !timeRe.MatchString(arg) {
-			return displayHelp("usage: /t <HHMM>")
+			return helpAlert("usage: /t <HHMM>")
 		}
 		task := m.currentTask()
 		if !task.IsPending() {
-			return displayWarning("no pending task to time block")
+			return warningAlert("no pending task to time block")
 		}
 		now, _ := time.Parse("1504", time.Now().Format("1504"))
 		endTime, _ := time.Parse("1504", arg)
@@ -598,22 +604,22 @@ func (m model) handleInput(input string) tea.Cmd {
 		case "/x":
 			return m.deleteLastPendingTaskItem()
 		case "/h":
-			return displayHelp(commandHelp)
+			return func() tea.Msg { return helpAlert(commandHelp) }
 		case "/e":
 			if len(parts) < 2 {
-				return displayHelp("usage: /e <edit>")
+				return func() tea.Msg { return helpAlert("usage: /e <edit>") }
 			}
 			return m.editPendingItem(parts[1])
 		case "/a":
 			if len(parts) < 2 {
-				return displayHelp("usage: /a <task>")
+				return func() tea.Msg { return helpAlert("usage: /a <task>") }
 			}
 			return m.queueTask(parts[1])
 		case "/k":
 			return m.skipPendingTask()
 		case "/t":
 			if len(parts) < 2 {
-				return displayHelp("usage: /t <HHMM>")
+				return func() tea.Msg { return helpAlert("usage: /t <HHMM>") }
 			}
 			return m.timeBlockPendingTask(parts[1])
 		case "/o":
