@@ -10,8 +10,8 @@ type TaskRepo interface {
 	GetTasks(context.Context, []any) ([]ExistingTaskRecord, error)
 	GetByParentID(context.Context, int) ([]ExistingTaskRecord, error)
 	GetByStartTime(ctx context.Context, min, max time.Time) ([]ExistingTaskRecord, error)
-	CreateTask(context.Context, TaskRecord) (ExistingTaskRecord, error)
-	UpdateTask(context.Context, ExistingTaskRecord, UpdatedTaskRecord) (ExistingTaskRecord, error)
+	InsertTask(context.Context, TaskRecord) (ExistingTaskRecord, error)
+	UpdateTask(context.Context, int, TaskRecord) (ExistingTaskRecord, error)
 	DeleteTasks(context.Context, []any) ([]ExistingTaskRecord, error)
 }
 
@@ -19,16 +19,13 @@ type TaskRecord struct {
 	Name      string
 	ParentID  int
 	StartedAt time.Time
+	EndedAt   time.Time
+	QueuedAt  time.Time
 	Tags      []string
 }
 
-type UpdatedTaskRecord struct {
-	TaskRecord
-	EndedAt time.Time
-}
-
 type ExistingTaskRecord struct {
-	UpdatedTaskRecord
+	TaskRecord
 	ID        int
 	CreatedAt time.Time
 }

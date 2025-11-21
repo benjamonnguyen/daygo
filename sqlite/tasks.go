@@ -148,15 +148,13 @@ func extractTask(s scannable) (daygo.ExistingTaskRecord, error) {
 	return mapToExistingTaskRecord(e), nil
 }
 
-func (r *taskRepo) CreateTask(ctx context.Context, task daygo.TaskRecord) (daygo.ExistingTaskRecord, error) {
+func (r *taskRepo) InsertTask(ctx context.Context, task daygo.TaskRecord) (daygo.ExistingTaskRecord, error) {
 	if task.Name == "" {
 		return daygo.ExistingTaskRecord{}, fmt.Errorf("provide required field 'Name'")
 	}
 
 	e := mapToTaskEntity(daygo.ExistingTaskRecord{
-		UpdatedTaskRecord: daygo.UpdatedTaskRecord{
-			TaskRecord: task,
-		},
+		TaskRecord: task,
 	})
 
 	query := `INSERT INTO tasks (name, parent_id, started_at, created_at, tags) VALUES (?, ?, ?, ?, ?)`
@@ -175,10 +173,15 @@ func (r *taskRepo) CreateTask(ctx context.Context, task daygo.TaskRecord) (daygo
 	return created, err
 }
 
-func (r *taskRepo) UpdateTask(ctx context.Context, existing daygo.ExistingTaskRecord, updated daygo.UpdatedTaskRecord) (daygo.ExistingTaskRecord, error) {
-	existing.UpdatedTaskRecord = updated
+func (r *taskRepo) UpdateTask(ctx context.Context, id int, updated daygo.TaskRecord) (daygo.ExistingTaskRecord, error) {
+	existing, err := r.GetTask(ctx, id)
+	if err != nil {
+		return existing, err
+	}
+
+	existing.TaskRecord = updated
 	e := mapToTaskEntity(existing)
-	_, err := r.db.ExecContext(
+	_, err = r.db.ExecContext(
 		ctx,
 		`UPDATE tasks
 		SET ended_at = ?, name = ?, started_at = ?, tags = ?
@@ -263,14 +266,12 @@ func mapToExistingTaskRecord(e taskEntity) daygo.ExistingTaskRecord {
 	return daygo.ExistingTaskRecord{
 		ID:        e.ID,
 		CreatedAt: time.Unix(e.CreatedAt, 0).Local(),
-		UpdatedTaskRecord: daygo.UpdatedTaskRecord{
-			EndedAt: endedAt,
-			TaskRecord: daygo.TaskRecord{
-				Name:      e.Name,
-				ParentID:  e.ParentID,
-				StartedAt: startedAt,
-				Tags:      tags,
-			},
+		TaskRecord: daygo.TaskRecord{
+			Name:      e.Name,
+			ParentID:  e.ParentID,
+			StartedAt: startedAt,
+			Tags:      tags,
+			EndedAt:   endedAt,
 		},
 	}
 }

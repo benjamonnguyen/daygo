@@ -1,52 +1,16 @@
 package main
 
 import (
-	"time"
-
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-type InitMsg struct{}
+type InitTaskQueueMsg struct {
+	tasks []Task
+}
 
 type EndProgramMsg struct {
 	discardPendingTask bool
 }
-
-type NewTaskMsg struct {
-	task Task
-}
-
-type NewNoteMsg struct {
-	note Note
-}
-
-type QueueTaskMsg struct {
-	task string
-}
-
-type EditItemMsg struct {
-	id   int
-	edit string
-}
-
-type SkipTaskMsg struct {
-	id int
-}
-
-type DeletePendingItemMsg struct {
-	id int
-}
-
-type EndPendingTaskMsg struct {
-	id int
-}
-
-type TimeBlockMsg struct {
-	id       int
-	duration time.Duration
-}
-
-type FetchTasks struct{}
 
 type AlertMsg struct {
 	message string
