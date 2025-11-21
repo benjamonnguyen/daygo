@@ -184,9 +184,9 @@ func (m model) initTaskQueue() tea.Msg {
 func (m model) endProgram(discardPendingTask bool) (model, tea.Cmd) {
 	m.quitting = true
 	if discardPendingTask && m.taskQueue.Size() > 0 {
-		_ = m.taskQueue.Dequeue()
+		_ = m.removeCurrentTask()
 	}
-	if t := m.taskQueue.Peek(); t != nil {
+	if t := m.currentTask(); t != nil {
 		t.IsTerminal = true
 		if t.IsPending() {
 			timeout, cancel := m.newTimeout()
@@ -306,8 +306,7 @@ func (m model) renderVisibleTasks() string {
 
 func (m *model) startNewTask(task string) Task {
 	_, _ = m.endPendingTask()
-	t := Task{}
-	t.Name = task
+	t := TaskFromName(task)
 	t.StartedAt = time.Now()
 	m.taskLog = append(m.taskLog, t)
 	return t
@@ -380,13 +379,15 @@ func (m *model) timeBlockPendingTask(arg string) {
 	m.tbTimer.Model = timer.New(endTime.Sub(now))
 }
 
-func (m *model) editPendingItem(edit string) {
+func (m *model) editPendingItem(edit string) *Task {
 	t := m.currentTask()
 	if n := t.LastNote(); n != nil {
 		n.Name = edit
 	} else {
 		t.Name = edit
+		return t
 	}
+	return nil
 }
 
 func (m model) handleInput(input string) (model, tea.Cmd) {
@@ -395,9 +396,7 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 		switch parts[0] {
 		case "/n":
 			if len(parts) == 2 {
-				t := Task{}
-				t.Name = parts[1]
-				m.taskQueue.Queue(t)
+				m.taskQueue.Queue(TaskFromName(parts[1]))
 			}
 
 			if m.taskQueue.Size() == 0 {
@@ -445,16 +444,27 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 				m.addAlert(colorize(colorYellow, "usage: /e <edit>"))
 				return m, nil
 			}
-			m.editPendingItem(input)
-			return m, nil
+			var cmd tea.Cmd
+			if t := m.editPendingItem(input); t != nil && t.ID != 0 {
+				// update existing task
+				cmd = func() tea.Msg {
+					timeout, c := m.newTimeout()
+					defer c()
+					if _, err := m.taskSvc.UpsertTask(timeout, *t); err != nil {
+						return ErrorMsg{
+							err: err,
+						}
+					}
+					return nil
+				}
+			}
+			return m, cmd
 		case "/a":
 			if len(parts) < 2 {
 				m.addAlert(colorize(colorYellow, "usage: /a <task>"))
 				return m, nil
 			}
-			t := Task{}
-			t.Name = parts[1]
-			t = m.taskQueue.Queue(t)
+			t := m.taskQueue.Queue(TaskFromName(parts[1]))
 			return m, func() tea.Msg {
 				timeout, c := m.newTimeout()
 				defer c()
@@ -495,7 +505,7 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 				return m, nil
 			}
 			m.timeBlockPendingTask(parts[1])
-			return m, nil
+			return m, m.tbTimer.Init()
 		case "/o":
 			return m, func() tea.Msg {
 				return EndProgramMsg{

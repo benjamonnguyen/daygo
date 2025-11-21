@@ -25,7 +25,7 @@ type taskQueue struct {
 }
 
 func NewTaskQueue(tasks []Task) TaskQueue {
-	slices.SortFunc[[]Task](tasks, func(a Task, b Task) int {
+	slices.SortFunc(tasks, func(a Task, b Task) int {
 		if a.QueuedAt.Before(b.QueuedAt) {
 			return 1
 		}

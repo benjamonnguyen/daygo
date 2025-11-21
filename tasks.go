@@ -21,7 +21,6 @@ type TaskRecord struct {
 	StartedAt time.Time
 	EndedAt   time.Time
 	QueuedAt  time.Time
-	Tags      []string
 }
 
 type ExistingTaskRecord struct {

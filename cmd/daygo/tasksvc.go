@@ -8,7 +8,7 @@ import (
 )
 
 type TaskSvc interface {
-	UpsertTask(context.Context, Task) (Task, error)
+	UpsertTask(context.Context, Task) (daygo.ExistingTaskRecord, error)
 	DeleteTask(ctx context.Context, id int) ([]daygo.ExistingTaskRecord, error)
 	GetAllTasks(ctx context.Context) ([]Task, error)
 }
@@ -24,31 +24,27 @@ func NewTaskSvc(taskRepo daygo.TaskRepo) TaskSvc {
 	}
 }
 
-func (s *taskSvc) UpsertTask(ctx context.Context, t Task) (Task, error) {
+func (s *taskSvc) UpsertTask(ctx context.Context, t Task) (daygo.ExistingTaskRecord, error) {
 	// insert
 	if t.ID == 0 {
 		inserted, err := s.repo.InsertTask(ctx, t.TaskRecord)
 		if err != nil {
-			return Task{}, err
+			return daygo.ExistingTaskRecord{}, err
 		}
 		if err := s.createNotes(ctx, t.Notes); err != nil {
-			return Task{}, err
+			return daygo.ExistingTaskRecord{}, err
 		}
-		return Task{
-			ExistingTaskRecord: inserted,
-		}, nil
+		return inserted, nil
 	}
 	// update
 	updated, err := s.repo.UpdateTask(ctx, t.ID, t.TaskRecord)
 	if err != nil {
-		return Task{}, err
+		return daygo.ExistingTaskRecord{}, err
 	}
 	if err := s.createNotes(ctx, t.Notes); err != nil {
-		return Task{}, err
+		return daygo.ExistingTaskRecord{}, err
 	}
-	return Task{
-		ExistingTaskRecord: updated,
-	}, nil
+	return updated, nil
 }
 
 func (s *taskSvc) createNotes(ctx context.Context, notes []Note) error {
@@ -69,9 +65,7 @@ func (s *taskSvc) GetAllTasks(ctx context.Context) ([]Task, error) {
 
 	tasks := make([]Task, 0, len(records))
 	for _, r := range records {
-		tasks = append(tasks, Task{
-			ExistingTaskRecord: r,
-		})
+		tasks = append(tasks, TaskFromRecord(r))
 	}
 
 	return tasks, nil
