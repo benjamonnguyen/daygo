@@ -4,6 +4,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,7 +14,7 @@ import (
 )
 
 const (
-	SelectAll = "SELECT id, name, started_at, ended_at, parent_id, created_at FROM tasks"
+	SelectAll = "SELECT id, name, started_at, ended_at, parent_id, created_at, tags FROM tasks"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -25,6 +26,7 @@ type taskEntity struct {
 	EndedAt   sql.NullInt64
 	CreatedAt int64
 	ParentID  int
+	Tags      sql.NullString
 }
 
 // taskRepo
@@ -139,30 +141,11 @@ func extractTasks(rows *sql.Rows) ([]daygo.ExistingTaskRecord, error) {
 
 func extractTask(s scannable) (daygo.ExistingTaskRecord, error) {
 	var e taskEntity
-	if err := s.Scan(&e.ID, &e.Name, &e.StartedAt, &e.EndedAt, &e.ParentID, &e.CreatedAt); err != nil {
+	if err := s.Scan(&e.ID, &e.Name, &e.StartedAt, &e.EndedAt, &e.ParentID, &e.CreatedAt, &e.Tags); err != nil {
 		return daygo.ExistingTaskRecord{}, err
 	}
 
-	// map to ExistingTaskRecord
-	var startedAt, endedAt time.Time
-	if e.StartedAt.Valid {
-		startedAt = time.Unix(e.StartedAt.Int64, 0).Local()
-	}
-	if e.EndedAt.Valid {
-		endedAt = time.Unix(e.EndedAt.Int64, 0).Local()
-	}
-	return daygo.ExistingTaskRecord{
-		ID:        e.ID,
-		CreatedAt: time.Unix(e.CreatedAt, 0).Local(),
-		UpdatedTaskRecord: daygo.UpdatedTaskRecord{
-			EndedAt: endedAt,
-			TaskRecord: daygo.TaskRecord{
-				Name:      e.Name,
-				ParentID:  e.ParentID,
-				StartedAt: startedAt,
-			},
-		},
-	}, nil
+	return mapToExistingTaskRecord(e), nil
 }
 
 func (r *taskRepo) CreateTask(ctx context.Context, task daygo.TaskRecord) (daygo.ExistingTaskRecord, error) {
@@ -170,20 +153,15 @@ func (r *taskRepo) CreateTask(ctx context.Context, task daygo.TaskRecord) (daygo
 		return daygo.ExistingTaskRecord{}, fmt.Errorf("provide required field 'Name'")
 	}
 
-	var e taskEntity
-	e.CreatedAt = time.Now().Unix()
-	if !task.StartedAt.IsZero() {
-		e.StartedAt = sql.NullInt64{
-			Valid: true,
-			Int64: task.StartedAt.Unix(),
-		}
-	}
-	e.Name = task.Name
-	e.ParentID = task.ParentID
+	e := mapToTaskEntity(daygo.ExistingTaskRecord{
+		UpdatedTaskRecord: daygo.UpdatedTaskRecord{
+			TaskRecord: task,
+		},
+	})
 
-	query := `INSERT INTO tasks (name, parent_id, started_at, created_at) VALUES (?, ?, ?, ?)`
+	query := `INSERT INTO tasks (name, parent_id, started_at, created_at, tags) VALUES (?, ?, ?, ?, ?)`
 	r.l.Debug("creating task", "query", query, "entity", e)
-	res, err := r.db.ExecContext(ctx, query, e.Name, e.ParentID, e.StartedAt, e.CreatedAt)
+	res, err := r.db.ExecContext(ctx, query, e.Name, e.ParentID, e.StartedAt, e.CreatedAt, e.Tags)
 	if err != nil {
 		return daygo.ExistingTaskRecord{}, err
 	}
@@ -199,12 +177,13 @@ func (r *taskRepo) CreateTask(ctx context.Context, task daygo.TaskRecord) (daygo
 
 func (r *taskRepo) UpdateTask(ctx context.Context, existing daygo.ExistingTaskRecord, updated daygo.UpdatedTaskRecord) (daygo.ExistingTaskRecord, error) {
 	existing.UpdatedTaskRecord = updated
+	e := mapToTaskEntity(existing)
 	_, err := r.db.ExecContext(
 		ctx,
 		`UPDATE tasks
-		SET ended_at = ?, name = ?, started_at = ?
+		SET ended_at = ?, name = ?, started_at = ?, tags = ?
 		WHERE id = ?`,
-		updated.EndedAt, updated.Name, updated.StartedAt, existing.ID,
+		e.EndedAt, e.Name, e.StartedAt, e.Tags, e.ID,
 	)
 	if err != nil {
 		return daygo.ExistingTaskRecord{}, err
@@ -239,7 +218,7 @@ func (r *taskRepo) DeleteTasks(ctx context.Context, ids []any) ([]daygo.Existing
 	return toDelete, nil
 }
 
-func mapToTaskEntity(task daygo.ExistingTaskRecord) (taskEntity, error) {
+func mapToTaskEntity(task daygo.ExistingTaskRecord) taskEntity {
 	var e taskEntity
 	e.Name = task.Name
 	e.CreatedAt = task.CreatedAt.Unix()
@@ -257,5 +236,41 @@ func mapToTaskEntity(task daygo.ExistingTaskRecord) (taskEntity, error) {
 			Int64: task.EndedAt.Unix(),
 		}
 	}
-	return e, nil
+	if len(task.Tags) > 0 {
+		tags, _ := json.Marshal(task.Tags)
+		e.Tags = sql.NullString{
+			Valid:  true,
+			String: string(tags),
+		}
+	}
+	return e
+}
+
+func mapToExistingTaskRecord(e taskEntity) daygo.ExistingTaskRecord {
+	var startedAt, endedAt time.Time
+	if e.StartedAt.Valid {
+		startedAt = time.Unix(e.StartedAt.Int64, 0).Local()
+	}
+	if e.EndedAt.Valid {
+		endedAt = time.Unix(e.EndedAt.Int64, 0).Local()
+	}
+
+	var tags []string
+	if e.Tags.Valid {
+		_ = json.Unmarshal([]byte(e.Tags.String), &tags)
+	}
+
+	return daygo.ExistingTaskRecord{
+		ID:        e.ID,
+		CreatedAt: time.Unix(e.CreatedAt, 0).Local(),
+		UpdatedTaskRecord: daygo.UpdatedTaskRecord{
+			EndedAt: endedAt,
+			TaskRecord: daygo.TaskRecord{
+				Name:      e.Name,
+				ParentID:  e.ParentID,
+				StartedAt: startedAt,
+				Tags:      tags,
+			},
+		},
+	}
 }
