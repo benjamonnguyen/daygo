@@ -142,8 +142,7 @@ func parseProgramArgs(ctx context.Context, taskSvc TaskSvc) (options, error) {
 	switch cmd {
 	case "/n", "":
 		if arg != "" {
-			t := Task{}
-			t.Name = arg
+			t := TaskFromName(arg)
 			t.QueuedAt = time.Now()
 			_, err := taskSvc.UpsertTask(ctx, t)
 			return opts, err
@@ -151,8 +150,7 @@ func parseProgramArgs(ctx context.Context, taskSvc TaskSvc) (options, error) {
 
 		return opts, nil
 	case "/a":
-		t := Task{}
-		t.Name = arg
+		t := TaskFromName(arg)
 		t.QueuedAt = time.Now()
 		_, err := taskSvc.UpsertTask(ctx, t)
 		if err != nil {

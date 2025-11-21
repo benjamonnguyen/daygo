@@ -4,7 +4,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,7 +13,7 @@ import (
 )
 
 const (
-	SelectAll = "SELECT id, name, started_at, ended_at, parent_id, created_at, tags FROM tasks"
+	SelectAll = "SELECT id, name, started_at, ended_at, parent_id, created_at FROM tasks"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -26,7 +25,6 @@ type taskEntity struct {
 	EndedAt   sql.NullInt64
 	CreatedAt int64
 	ParentID  int
-	Tags      sql.NullString
 }
 
 // taskRepo
@@ -141,7 +139,7 @@ func extractTasks(rows *sql.Rows) ([]daygo.ExistingTaskRecord, error) {
 
 func extractTask(s scannable) (daygo.ExistingTaskRecord, error) {
 	var e taskEntity
-	if err := s.Scan(&e.ID, &e.Name, &e.StartedAt, &e.EndedAt, &e.ParentID, &e.CreatedAt, &e.Tags); err != nil {
+	if err := s.Scan(&e.ID, &e.Name, &e.StartedAt, &e.EndedAt, &e.ParentID, &e.CreatedAt); err != nil {
 		return daygo.ExistingTaskRecord{}, err
 	}
 
@@ -157,9 +155,9 @@ func (r *taskRepo) InsertTask(ctx context.Context, task daygo.TaskRecord) (daygo
 		TaskRecord: task,
 	})
 
-	query := `INSERT INTO tasks (name, parent_id, started_at, created_at, tags) VALUES (?, ?, ?, ?, ?)`
+	query := `INSERT INTO tasks (name, parent_id, started_at, created_at) VALUES (?, ?, ?, ?)`
 	r.l.Debug("creating task", "query", query, "entity", e)
-	res, err := r.db.ExecContext(ctx, query, e.Name, e.ParentID, e.StartedAt, e.CreatedAt, e.Tags)
+	res, err := r.db.ExecContext(ctx, query, e.Name, e.ParentID, e.StartedAt, e.CreatedAt)
 	if err != nil {
 		return daygo.ExistingTaskRecord{}, err
 	}
@@ -184,9 +182,9 @@ func (r *taskRepo) UpdateTask(ctx context.Context, id int, updated daygo.TaskRec
 	_, err = r.db.ExecContext(
 		ctx,
 		`UPDATE tasks
-		SET ended_at = ?, name = ?, started_at = ?, tags = ?
+		SET ended_at = ?, name = ?, started_at = ?
 		WHERE id = ?`,
-		e.EndedAt, e.Name, e.StartedAt, e.Tags, e.ID,
+		e.EndedAt, e.Name, e.StartedAt, e.ID,
 	)
 	if err != nil {
 		return daygo.ExistingTaskRecord{}, err
@@ -239,13 +237,6 @@ func mapToTaskEntity(task daygo.ExistingTaskRecord) taskEntity {
 			Int64: task.EndedAt.Unix(),
 		}
 	}
-	if len(task.Tags) > 0 {
-		tags, _ := json.Marshal(task.Tags)
-		e.Tags = sql.NullString{
-			Valid:  true,
-			String: string(tags),
-		}
-	}
 	return e
 }
 
@@ -258,11 +249,6 @@ func mapToExistingTaskRecord(e taskEntity) daygo.ExistingTaskRecord {
 		endedAt = time.Unix(e.EndedAt.Int64, 0).Local()
 	}
 
-	var tags []string
-	if e.Tags.Valid {
-		_ = json.Unmarshal([]byte(e.Tags.String), &tags)
-	}
-
 	return daygo.ExistingTaskRecord{
 		ID:        e.ID,
 		CreatedAt: time.Unix(e.CreatedAt, 0).Local(),
@@ -270,7 +256,6 @@ func mapToExistingTaskRecord(e taskEntity) daygo.ExistingTaskRecord {
 			Name:      e.Name,
 			ParentID:  e.ParentID,
 			StartedAt: startedAt,
-			Tags:      tags,
 			EndedAt:   endedAt,
 		},
 	}

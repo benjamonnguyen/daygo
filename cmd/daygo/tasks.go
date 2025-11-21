@@ -12,6 +12,7 @@ import (
 type Task struct {
 	daygo.ExistingTaskRecord
 	Notes      []Note
+	Tags       []string
 	IsTerminal bool
 }
 
@@ -65,4 +66,32 @@ func (t Task) Render(timeFormat string) (string, int) {
 
 func (n Note) Render(timeFormat string) string {
 	return formatForDisplay(daygo.TaskRecord(n), timeFormat)
+}
+
+func extractTags(s string) []string {
+	var tags []string
+	for w := range strings.SplitSeq(s, " ") {
+		if strings.HasPrefix(w, "#") {
+			tags = append(tags, string(w[1:]))
+		}
+	}
+	return tags
+}
+
+func TaskFromName(name string) Task {
+	if name == "" {
+		return Task{}
+	}
+	t := Task{}
+	t.Name = name
+	t.Tags = extractTags(name)
+	return t
+}
+
+func TaskFromRecord(r daygo.ExistingTaskRecord) Task {
+	t := Task{
+		ExistingTaskRecord: r,
+	}
+	t.Tags = extractTags(r.Name)
+	return t
 }
