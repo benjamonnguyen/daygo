@@ -40,8 +40,9 @@ const commandHelp = `COMMANDS:
   /a <task>: add task to the queue
   /e <edit>: edit text of current item
   /t <HHMM>: set a time to auto-end task
+  /f [tag]: filter task queue by tag; if no tag provided, clear filter
 
-	/o: end program without saving
+  /o: end program without saving
 `
 
 var timeRe = regexp.MustCompile(`^(?:[01]\d|2[0-3])[0-5]\d$`)
@@ -57,11 +58,13 @@ type model struct {
 	taskSvc TaskSvc
 
 	// state
-	taskQueue TaskQueue
-	taskLog   []Task
-	alerts    []string
-	quitting  bool
-	h         int
+	taskQueue    TaskQueue
+	taskLog      []Task
+	currentTag   string
+	tagToTaskCnt map[string]int
+	alerts       []string
+	quitting     bool
+	h            int
 
 	// configuration
 	cmdTimeout time.Duration
@@ -95,15 +98,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ErrorMsg:
-		m = m.addAlert(colorize(colorRed, msg.err.Error()))
+		m.addAlert(msg.err.Error(), colorRed)
 		return m, tea.Quit
-	case AlertMsg:
-		if msg.color != colorNone {
-			m = m.addAlert(colorize(msg.color, msg.message))
-		} else {
-			m = m.addAlert(msg.message)
-		}
-		return m, nil
 	case timer.TimeoutMsg:
 		if msg.ID == m.tbTimer.ID() {
 			ended, err := m.endPendingTask()
@@ -129,17 +125,28 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 		m.h = msg.Height
 		m.userinput.Width = msg.Width
 		m.vp.Width = msg.Width
-		m.updateViewport()
+		m.resizeViewport()
 		return m, nil
 	case InitTaskQueueMsg:
 		m.taskQueue = NewTaskQueue(msg.tasks)
-		if m.taskQueue.Size() > 0 {
+
+		m.tagToTaskCnt = make(map[string]int)
+		for _, task := range msg.tasks {
+			m.addTags(task.Tags)
+		}
+
+		if len(m.taskLog) > 0 {
+			for _, task := range m.taskLog {
+				m.addTags(task.Tags)
+			}
+		} else if m.taskQueue.Size() > 0 {
 			t := m.taskQueue.Dequeue()
 			t.StartedAt = time.Now()
 			m.taskLog = append(m.taskLog, t)
 		}
+
 		m.vp.SetContent(m.renderVisibleTasks())
-		m.updateViewport()
+		m.resizeViewport()
 		return m, nil
 	case EndProgramMsg:
 		return m.endProgram(msg.discardPendingTask)
@@ -156,13 +163,21 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 			m.alerts = nil
 			m, cmd = m.handleInput(input)
 			m.vp.SetContent(m.renderVisibleTasks())
-			m.updateViewport()
+			m.resizeViewport()
 			return m, cmd
 		case tea.KeyCtrlC:
 			return m.endProgram(false)
 		}
 	}
 	return m, nil
+}
+
+func (m model) tags() []string {
+	tags := make([]string, 0, len(m.tagToTaskCnt))
+	for tag := range m.tagToTaskCnt {
+		tags = append(tags, tag)
+	}
+	return tags
 }
 
 func (m model) initTaskQueue() tea.Msg {
@@ -181,6 +196,22 @@ func (m model) initTaskQueue() tea.Msg {
 	}
 }
 
+func (m *model) addTags(tags []string) {
+	for _, tag := range tags {
+		m.tagToTaskCnt[tag] += 1
+	}
+}
+
+func (m *model) removeTags(tags []string) {
+	for _, tag := range tags {
+		if m.tagToTaskCnt[tag] == 1 {
+			delete(m.tagToTaskCnt, tag)
+		} else {
+			m.tagToTaskCnt[tag] += 1
+		}
+	}
+}
+
 func (m model) endProgram(discardPendingTask bool) (model, tea.Cmd) {
 	m.quitting = true
 	if discardPendingTask && m.taskQueue.Size() > 0 {
@@ -196,62 +227,106 @@ func (m model) endProgram(discardPendingTask bool) (model, tea.Cmd) {
 				logger.Error(err.Error())
 			}
 		}
-		m.updateViewport()
+		m.resizeViewport()
 	}
 	return m, tea.Quit
 }
 
-func (m model) footerHeight() int {
+func (m model) renderFooter() string {
 	if m.quitting {
-		return 1
+		return ""
 	}
-	// TODO magicnumber
-	h := 6 + len(m.alerts)
-	return h
+
+	var footer strings.Builder
+	footer.WriteRune('\n')
+	footer.WriteString(m.userinput.View())
+	footer.WriteString("\n\n")
+
+	showQuit := true
+	if !m.tbTimer.Timedout() {
+		footer.WriteString(m.tbTimer.View())
+		footer.WriteString("\n\n")
+		showQuit = false
+	}
+
+	if len(m.alerts) > 0 {
+		footer.WriteString(strings.Join(m.alerts, "\n"))
+		footer.WriteString("\n\n")
+		showQuit = false
+	}
+
+	if len(m.tagToTaskCnt) > 0 {
+		footer.WriteString(m.renderTags())
+		footer.WriteString("\n\n")
+	}
+
+	if showQuit {
+		footer.WriteString(faintStyle.Render("(ctrl+c to quit)"))
+		footer.WriteRune('\n')
+	}
+
+	return footer.String()
+}
+
+func (m model) renderTags() string {
+	tags := m.tags()
+	if len(tags) == 0 {
+		return ""
+	}
+
+	// sort to get consistent ordering
+	slices.Sort(tags)
+
+	// Format tags with # prefix
+	var tagLines []string
+	var currentLine []string
+	lineWidth := 0
+
+	for _, tag := range tags {
+		tagText := "#" + tag
+
+		// Apply styling
+		var styledTag string
+		if tag == m.currentTag {
+			styledTag = colorize(colorCyan, tagText)
+		} else {
+			styledTag = faintStyle.Render(tagText)
+		}
+
+		tagWidth := lipgloss.Width(styledTag)
+
+		// Check if adding this tag would exceed line width
+		// Assume reasonable max width of 80 characters for the footer
+		if lineWidth > 0 && lineWidth+tagWidth+1 >= m.vp.Width {
+			// Start new line
+			tagLines = append(tagLines, strings.Join(currentLine, " "))
+			currentLine = []string{styledTag}
+			lineWidth = tagWidth
+		} else {
+			// Add to current line with space separator
+			currentLine = append(currentLine, styledTag)
+			lineWidth += tagWidth + 1
+		}
+	}
+
+	// Add the last line
+	if len(currentLine) > 0 {
+		tagLines = append(tagLines, strings.Join(currentLine, " "))
+	}
+
+	return strings.Join(tagLines, "\n")
 }
 
 func (m model) View() string {
-	// sections
-	var content, footer strings.Builder
-
-	// content
-	content.WriteString(m.vp.View())
-
-	// footer
-	footer.WriteRune('\n')
-	if !m.quitting {
-		footer.WriteString(m.userinput.View())
-		footer.WriteString("\n\n")
-
-		showQuit := true
-		if !m.tbTimer.Timedout() {
-			footer.WriteString(m.tbTimer.View())
-			footer.WriteRune('\n')
-			showQuit = false
-		}
-
-		if len(m.alerts) > 0 {
-			footer.WriteString(strings.Join(m.alerts, "\n"))
-			footer.WriteRune('\n')
-			showQuit = false
-		}
-
-		if showQuit {
-			footer.WriteString(faintStyle.Render("(ctrl+c to quit)"))
-			footer.WriteRune('\n')
-		}
-	}
-
-	return lipgloss.JoinVertical(0, content.String(), footer.String())
+	return lipgloss.JoinVertical(0, m.vp.View(), m.renderFooter())
 }
 
 func (m model) newTimeout() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), m.cmdTimeout)
 }
 
-func (m model) addAlert(alert string) model {
-	m.alerts = append(m.alerts, alert)
-	return m
+func (m *model) addAlert(alert string, c color) {
+	m.alerts = append(m.alerts, colorize(c, alert))
 }
 
 func (m model) currentTask() *Task {
@@ -273,15 +348,16 @@ func (m *model) endPendingTask() (Task, error) {
 	if n := t.LastNote(); n != nil {
 		n.EndedAt = now
 	}
+
+	m.removeTags(t.Tags)
+
 	return *t, nil
 }
 
-func (m *model) updateViewport() {
-	tasksHeight := 0
-	for _, t := range m.taskLog {
-		tasksHeight += len(t.Notes) + 2
-	}
-	m.vp.Height = min(tasksHeight, m.h-m.footerHeight())
+func (m *model) resizeViewport() {
+	tasksHeight := lipgloss.Height(m.renderVisibleTasks())
+	footerHeight := lipgloss.Height(m.renderFooter())
+	m.vp.Height = min(tasksHeight, m.h-footerHeight)
 	m.vp.GotoBottom()
 }
 
@@ -308,6 +384,7 @@ func (m *model) startNewTask(task string) Task {
 	_, _ = m.endPendingTask()
 	t := TaskFromName(task)
 	t.StartedAt = time.Now()
+	m.addTags(t.Tags)
 	m.taskLog = append(m.taskLog, t)
 	return t
 }
@@ -343,6 +420,7 @@ func (m *model) deleteLastPendingTaskItem() int {
 
 func (m *model) removeCurrentTask() Task {
 	if t := m.currentTask(); t != nil {
+		m.removeTags(t.Tags)
 		m.taskLog = m.taskLog[:len(m.taskLog)-1]
 		return *t
 	}
@@ -361,12 +439,12 @@ func (m *model) removeLastNote() Note {
 
 func (m *model) timeBlockPendingTask(arg string) {
 	if !timeRe.MatchString(arg) {
-		m.addAlert(colorize(colorYellow, "usage: /t <HHMM>"))
+		m.addAlert("usage: /t <HHMM>", colorYellow)
 		return
 	}
 	task := m.currentTask()
 	if !task.IsPending() {
-		m.addAlert(colorize(colorRed, "no pending task to time block"))
+		m.addAlert("no pending task to time block", colorRed)
 		return
 	}
 	now, _ := time.Parse("1504", time.Now().Format("1504"))
@@ -384,10 +462,18 @@ func (m *model) editPendingItem(edit string) *Task {
 	if n := t.LastNote(); n != nil {
 		n.Name = edit
 	} else {
+		m.removeTags(t.Tags)
 		t.Name = edit
+		t.Tags = extractTags(edit)
+		m.addTags(t.Tags)
 		return t
 	}
 	return nil
+}
+
+func (m *model) queue(task Task) Task {
+	m.addTags(task.Tags)
+	return m.taskQueue.Queue(task)
 }
 
 func (m model) handleInput(input string) (model, tea.Cmd) {
@@ -395,24 +481,28 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 		parts := strings.SplitN(input, " ", 2)
 		switch parts[0] {
 		case "/n":
-			if len(parts) == 2 {
-				m.taskQueue.Queue(TaskFromName(parts[1]))
+
+			var started Task
+			if len(parts) < 2 {
+				if m.taskQueue.Size() == 0 {
+					m.addAlert("task queue is empty", colorRed)
+					return m, nil
+				}
+
+				started = m.taskQueue.Dequeue()
+			} else {
+				started = TaskFromName(parts[1])
+				m.addTags(started.Tags)
 			}
 
-			if m.taskQueue.Size() == 0 {
-				m.addAlert(colorize(colorRed, "task queue is empty"))
-				return m, nil
-			}
-
-			endedTask, _ := m.endPendingTask()
-			startedTask := m.taskQueue.Dequeue()
-			startedTask.StartedAt = time.Now()
-			m.taskLog = append(m.taskLog, startedTask)
+			ended, _ := m.endPendingTask()
+			started.StartedAt = time.Now()
+			m.taskLog = append(m.taskLog, started)
 
 			return m, func() tea.Msg {
 				timeout, cancel := m.newTimeout()
 				defer cancel()
-				if _, err := m.taskSvc.UpsertTask(timeout, endedTask); err != nil {
+				if _, err := m.taskSvc.UpsertTask(timeout, ended); err != nil {
 					return ErrorMsg{
 						err: err,
 					}
@@ -422,7 +512,7 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 		case "/x":
 			id := m.deleteLastPendingTaskItem()
 			if id == 0 {
-				m.addAlert(colorize(colorRed, "nothing left to delete"))
+				m.addAlert("nothing left to delete", colorRed)
 				return m, nil
 			}
 			return m, func() tea.Msg {
@@ -437,11 +527,11 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 				return nil
 			}
 		case "/h":
-			m.addAlert(colorize(colorYellow, commandHelp))
+			m.addAlert(commandHelp, colorYellow)
 			return m, nil
 		case "/e":
 			if len(parts) < 2 {
-				m.addAlert(colorize(colorYellow, "usage: /e <edit>"))
+				m.addAlert("usage: /e <edit>", colorYellow)
 				return m, nil
 			}
 			var cmd tea.Cmd
@@ -461,10 +551,10 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 			return m, cmd
 		case "/a":
 			if len(parts) < 2 {
-				m.addAlert(colorize(colorYellow, "usage: /a <task>"))
+				m.addAlert("usage: /a <task>", colorYellow)
 				return m, nil
 			}
-			t := m.taskQueue.Queue(TaskFromName(parts[1]))
+			t := m.queue(TaskFromName(parts[1]))
 			return m, func() tea.Msg {
 				timeout, c := m.newTimeout()
 				defer c()
@@ -476,18 +566,17 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 				return nil
 			}
 		case "/k":
-			curr := m.currentTask()
-			if !curr.IsPending() {
-				m.addAlert(colorize(colorRed, "no pending task to skip"))
+			if !m.currentTask().IsPending() {
+				m.addAlert("no pending task to skip", colorRed)
 				return m, nil
 			}
-			_ = m.removeCurrentTask()
+			curr := m.removeCurrentTask()
 
 			if m.taskQueue.Size() > 0 {
 				t := m.taskQueue.Dequeue()
 				m.taskLog = append(m.taskLog, t)
 			}
-			queued := m.taskQueue.Queue(*curr)
+			queued := m.queue(curr)
 
 			return m, func() tea.Msg {
 				timeout, c := m.newTimeout()
@@ -501,11 +590,19 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 			}
 		case "/t":
 			if len(parts) < 2 {
-				m.addAlert(colorize(colorYellow, "usage: /t <HHMM>"))
+				m.addAlert("usage: /t <HHMM>", colorYellow)
 				return m, nil
 			}
 			m.timeBlockPendingTask(parts[1])
 			return m, m.tbTimer.Init()
+		case "/f":
+			if len(parts) < 2 {
+				m.currentTag = ""
+			} else {
+				m.currentTag = parts[1]
+			}
+			m.taskQueue.SetFilter(m.currentTag)
+			return m, nil
 		case "/o":
 			return m, func() tea.Msg {
 				return EndProgramMsg{
