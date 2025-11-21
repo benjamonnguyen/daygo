@@ -46,6 +46,8 @@ type TimeBlockMsg struct {
 	duration time.Duration
 }
 
+type FetchTasks struct{}
+
 type AlertMsg struct {
 	message string
 	color   color
