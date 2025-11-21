@@ -88,9 +88,6 @@ func main() {
 		userinput:  userinput,
 		vp:         viewport.New(0, 0),
 	}
-	if opts.firstTask.ID != 0 {
-		m.tasks = []Task{opts.firstTask}
-	}
 
 	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
@@ -121,7 +118,6 @@ func configLogger(level string, w io.Writer) *slog.Logger {
 
 type options struct {
 	showHelp   bool
-	firstTask  Task
 	shouldExit bool
 }
 
@@ -129,12 +125,6 @@ func parseProgramArgs(ctx context.Context, taskSvc TaskSvc) (options, error) {
 	var opts options
 
 	if len(os.Args) == 1 {
-		task, err := taskSvc.DequeueTask(ctx)
-		if err != nil {
-			return options{}, err
-		}
-
-		opts.firstTask.ExistingTaskRecord = task
 		return opts, nil
 	}
 
@@ -151,28 +141,20 @@ func parseProgramArgs(ctx context.Context, taskSvc TaskSvc) (options, error) {
 	logger.Debug("parsed program args", "cmd", cmd, "arg", arg)
 	switch cmd {
 	case "/n", "":
-		if arg == "" {
-			task, err := taskSvc.DequeueTask(ctx)
-			if err != nil {
-				return options{}, err
-			}
-
-			opts.firstTask.ExistingTaskRecord = task
-			return opts, nil
+		if arg != "" {
+			t := Task{}
+			t.Name = arg
+			t.QueuedAt = time.Now()
+			_, err := taskSvc.UpsertTask(ctx, t)
+			return opts, err
 		}
 
-		task, err := taskSvc.StartTask(ctx, startTaskRequest{
-			Name: arg,
-		})
-		if err != nil {
-			return options{}, err
-		}
-		opts.firstTask.ExistingTaskRecord = task
 		return opts, nil
 	case "/a":
-		_, err := taskSvc.QueueTask(ctx, queueTaskRequest{
-			Name: arg,
-		})
+		t := Task{}
+		t.Name = arg
+		t.QueuedAt = time.Now()
+		_, err := taskSvc.UpsertTask(ctx, t)
 		if err != nil {
 			return options{}, err
 		}

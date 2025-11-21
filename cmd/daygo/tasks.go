@@ -1,24 +1,11 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/benjamonnguyen/daygo"
 )
-
-type TaskSvc interface {
-	StartTask(context.Context, startTaskRequest) (daygo.ExistingTaskRecord, error)
-	EndTask(ctx context.Context, id int) (daygo.ExistingTaskRecord, error)
-	DeleteTask(ctx context.Context, id int) ([]daygo.ExistingTaskRecord, error)
-	RenameTask(ctx context.Context, id int, newName string) (daygo.ExistingTaskRecord, error)
-	DequeueTask(ctx context.Context) (daygo.ExistingTaskRecord, error)
-	QueueTask(context.Context, queueTaskRequest) (daygo.ExistingTaskRecord, error)
-	PeekNextTask(context.Context) (daygo.ExistingTaskRecord, error)
-	SkipTask(ctx context.Context, id int) error
-}
 
 // models
 
@@ -28,10 +15,10 @@ type Task struct {
 	IsTerminal bool
 }
 
-type Note daygo.ExistingTaskRecord
+type Note daygo.TaskRecord
 
 func (t *Task) IsPending() bool {
-	return t != nil && t.ID != 0 && t.EndedAt.IsZero()
+	return t != nil && !t.StartedAt.IsZero() && t.EndedAt.IsZero()
 }
 
 func (t Task) LastNote() *Note {
@@ -55,7 +42,7 @@ func (t Task) Render(timeFormat string) (string, int) {
 	l := maxItemWidth + 10
 	l = max(minLineWidth, l)
 
-	forDisplay := formatForDisplay(t.ExistingTaskRecord, timeFormat)
+	forDisplay := formatForDisplay(t.TaskRecord, timeFormat)
 	taskLine := fmt.Sprintf("%s %s%c", forDisplay, line(l-len(forDisplay)), tailDown)
 	lines := []string{
 		taskLine,
@@ -77,128 +64,5 @@ func (t Task) Render(timeFormat string) (string, int) {
 }
 
 func (n Note) Render(timeFormat string) string {
-	return formatForDisplay(daygo.ExistingTaskRecord(n), timeFormat)
-}
-
-// request objects
-type startTaskRequest struct {
-	ID       int // if ID is provided, all other fields are ignored
-	Name     string
-	ParentID int
-}
-
-type queueTaskRequest struct {
-	Name string
-}
-
-// impl
-type taskSvc struct {
-	repo daygo.TaskRepo
-}
-
-func NewTaskSvc(taskRepo daygo.TaskRepo) TaskSvc {
-	return &taskSvc{
-		repo: taskRepo,
-	}
-}
-
-// SkipTask replaces provided task with fresh copy
-func (s *taskSvc) SkipTask(ctx context.Context, id int) error {
-	deleted, err := s.repo.DeleteTasks(ctx, []any{id})
-	if err != nil {
-		return err
-	}
-	if len(deleted) == 0 {
-		return fmt.Errorf("task not found with id: %d", id)
-	}
-
-	og := deleted[0]
-	og.StartedAt = time.Time{}
-	_, err = s.repo.CreateTask(ctx, og.TaskRecord)
-	return err
-}
-
-func (s *taskSvc) StartTask(ctx context.Context, req startTaskRequest) (daygo.ExistingTaskRecord, error) {
-	now := time.Now().Local()
-	if req.ID != 0 {
-		existing, err := s.repo.GetTask(ctx, req.ID)
-		if err != nil {
-			return daygo.ExistingTaskRecord{}, err
-		}
-		existing.UpdatedTaskRecord.StartedAt = now
-		return s.repo.UpdateTask(ctx, existing, existing.UpdatedTaskRecord)
-	}
-
-	return s.repo.CreateTask(ctx, daygo.TaskRecord{
-		Name:      req.Name,
-		ParentID:  req.ParentID,
-		StartedAt: now,
-	})
-}
-
-func (s *taskSvc) EndTask(ctx context.Context, id int) (daygo.ExistingTaskRecord, error) {
-	now := time.Now().Local()
-	existing, err := s.repo.GetTask(ctx, id)
-	if err != nil {
-		return daygo.ExistingTaskRecord{}, err
-	}
-	existing.UpdatedTaskRecord.EndedAt = now
-	return s.repo.UpdateTask(ctx, existing, existing.UpdatedTaskRecord)
-}
-
-func (s *taskSvc) DeleteTask(ctx context.Context, id int) ([]daygo.ExistingTaskRecord, error) {
-	res, err := s.repo.DeleteTasks(ctx, []any{id})
-	if err != nil {
-		return nil, err
-	}
-	return res, nil
-}
-
-func (s *taskSvc) RenameTask(ctx context.Context, id int, newName string) (daygo.ExistingTaskRecord, error) {
-	existing, err := s.repo.GetTask(ctx, id)
-	if err != nil {
-		return daygo.ExistingTaskRecord{}, err
-	}
-	existing.UpdatedTaskRecord.Name = newName
-	return s.repo.UpdateTask(ctx, existing, existing.UpdatedTaskRecord)
-}
-
-func (s *taskSvc) QueueTask(ctx context.Context, req queueTaskRequest) (daygo.ExistingTaskRecord, error) {
-	return s.repo.CreateTask(ctx, daygo.TaskRecord{
-		Name: req.Name,
-	})
-}
-
-func (s *taskSvc) DequeueTask(ctx context.Context) (daygo.ExistingTaskRecord, error) {
-	next, err := s.PeekNextTask(ctx)
-	if err != nil {
-		return daygo.ExistingTaskRecord{}, err
-	}
-
-	if next.ID == 0 {
-		return daygo.ExistingTaskRecord{}, fmt.Errorf("task queue is empty")
-	}
-
-	return s.StartTask(ctx, startTaskRequest{
-		ID: next.ID,
-	})
-}
-
-func (s *taskSvc) PeekNextTask(ctx context.Context) (daygo.ExistingTaskRecord, error) {
-	tasks, err := s.repo.GetByStartTime(ctx, time.Time{}, time.Time{})
-	if err != nil {
-		return daygo.ExistingTaskRecord{}, err
-	}
-	if len(tasks) == 0 {
-		return daygo.ExistingTaskRecord{}, nil
-	}
-
-	earliest := tasks[0]
-	for _, task := range tasks[1:] {
-		if task.CreatedAt.Compare(earliest.CreatedAt) < 0 {
-			earliest = task
-		}
-	}
-
-	return earliest, nil
+	return formatForDisplay(daygo.TaskRecord(n), timeFormat)
 }

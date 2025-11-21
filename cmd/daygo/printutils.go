@@ -35,6 +35,6 @@ func colorize(color color, s string) string {
 	return string(color) + s + colorReset
 }
 
-func formatForDisplay(task daygo.ExistingTaskRecord, format string) string {
+func formatForDisplay(task daygo.TaskRecord, format string) string {
 	return fmt.Sprintf("[%s] %s", task.StartedAt.Format(format), task.Name)
 }
