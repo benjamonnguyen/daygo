@@ -11,7 +11,7 @@ type TaskRepo interface {
 	GetByParentID(context.Context, int) ([]ExistingTaskRecord, error)
 	GetByStartTime(ctx context.Context, min, max time.Time) ([]ExistingTaskRecord, error)
 	CreateTask(context.Context, TaskRecord) (ExistingTaskRecord, error)
-	UpdateTask(context.Context, int, UpdatableFields) (ExistingTaskRecord, error)
+	UpdateTask(context.Context, ExistingTaskRecord, UpdatedTaskRecord) (ExistingTaskRecord, error)
 	DeleteTasks(context.Context, []any) ([]ExistingTaskRecord, error)
 }
 
@@ -19,17 +19,16 @@ type TaskRecord struct {
 	Name      string
 	ParentID  int
 	StartedAt time.Time
+	Tags      []string
 }
 
-type UpdatableFields struct {
-	Name      string
-	EndedAt   time.Time
-	StartedAt time.Time
+type UpdatedTaskRecord struct {
+	TaskRecord
+	EndedAt time.Time
 }
 
 type ExistingTaskRecord struct {
-	TaskRecord
+	UpdatedTaskRecord
 	ID        int
-	EndedAt   time.Time
 	CreatedAt time.Time
 }

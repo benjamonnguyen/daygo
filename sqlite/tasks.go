@@ -56,7 +56,7 @@ func (r *taskRepo) GetTask(ctx context.Context, id int) (daygo.ExistingTaskRecor
 	if err != nil {
 		return task, err
 	}
-	if task == (daygo.ExistingTaskRecord{}) {
+	if task.ID == 0 {
 		return task, ErrNotFound
 	}
 	return task, nil
@@ -153,12 +153,14 @@ func extractTask(s scannable) (daygo.ExistingTaskRecord, error) {
 	}
 	return daygo.ExistingTaskRecord{
 		ID:        e.ID,
-		EndedAt:   endedAt,
 		CreatedAt: time.Unix(e.CreatedAt, 0).Local(),
-		TaskRecord: daygo.TaskRecord{
-			Name:      e.Name,
-			ParentID:  e.ParentID,
-			StartedAt: startedAt,
+		UpdatedTaskRecord: daygo.UpdatedTaskRecord{
+			EndedAt: endedAt,
+			TaskRecord: daygo.TaskRecord{
+				Name:      e.Name,
+				ParentID:  e.ParentID,
+				StartedAt: startedAt,
+			},
 		},
 	}, nil
 }
@@ -195,49 +197,21 @@ func (r *taskRepo) CreateTask(ctx context.Context, task daygo.TaskRecord) (daygo
 	return created, err
 }
 
-func (r *taskRepo) UpdateTask(ctx context.Context, id int, f daygo.UpdatableFields) (daygo.ExistingTaskRecord, error) {
-	existingTask, err := r.GetTask(ctx, id)
-	if err != nil {
-		return daygo.ExistingTaskRecord{}, err
-	}
-	e, err := mapToTaskEntity(existingTask)
-	if err != nil {
-		return daygo.ExistingTaskRecord{}, nil
-	}
-
-	if !f.EndedAt.IsZero() {
-		e.EndedAt = sql.NullInt64{
-			Valid: true,
-			Int64: f.EndedAt.Unix(),
-		}
-	}
-	if f.Name != "" {
-		e.Name = f.Name
-	}
-	if !f.StartedAt.IsZero() {
-		e.StartedAt = sql.NullInt64{
-			Valid: true,
-			Int64: f.StartedAt.Unix(),
-		}
-	}
-
-	_, err = r.db.ExecContext(
+func (r *taskRepo) UpdateTask(ctx context.Context, existing daygo.ExistingTaskRecord, updated daygo.UpdatedTaskRecord) (daygo.ExistingTaskRecord, error) {
+	existing.UpdatedTaskRecord = updated
+	_, err := r.db.ExecContext(
 		ctx,
 		`UPDATE tasks
 		SET ended_at = ?, name = ?, started_at = ?
 		WHERE id = ?`,
-		e.EndedAt, e.Name, e.StartedAt, e.ID,
+		updated.EndedAt, updated.Name, updated.StartedAt, existing.ID,
 	)
 	if err != nil {
 		return daygo.ExistingTaskRecord{}, err
 	}
 
-	updated, err := r.GetTask(ctx, id)
-	if err != nil {
-		return daygo.ExistingTaskRecord{}, err
-	}
-	r.l.Debug("updated task", "task", updated)
-	return updated, nil
+	r.l.Debug("updated task", "task", existing)
+	return existing, nil
 }
 
 func (r *taskRepo) DeleteTasks(ctx context.Context, ids []any) ([]daygo.ExistingTaskRecord, error) {

@@ -121,9 +121,12 @@ func (s *taskSvc) SkipTask(ctx context.Context, id int) error {
 func (s *taskSvc) StartTask(ctx context.Context, req startTaskRequest) (daygo.ExistingTaskRecord, error) {
 	now := time.Now().Local()
 	if req.ID != 0 {
-		return s.repo.UpdateTask(ctx, req.ID, daygo.UpdatableFields{
-			StartedAt: now,
-		})
+		existing, err := s.repo.GetTask(ctx, req.ID)
+		if err != nil {
+			return daygo.ExistingTaskRecord{}, err
+		}
+		existing.UpdatedTaskRecord.StartedAt = now
+		return s.repo.UpdateTask(ctx, existing, existing.UpdatedTaskRecord)
 	}
 
 	return s.repo.CreateTask(ctx, daygo.TaskRecord{
@@ -134,9 +137,13 @@ func (s *taskSvc) StartTask(ctx context.Context, req startTaskRequest) (daygo.Ex
 }
 
 func (s *taskSvc) EndTask(ctx context.Context, id int) (daygo.ExistingTaskRecord, error) {
-	return s.repo.UpdateTask(ctx, id, daygo.UpdatableFields{
-		EndedAt: time.Now().Local(),
-	})
+	now := time.Now().Local()
+	existing, err := s.repo.GetTask(ctx, id)
+	if err != nil {
+		return daygo.ExistingTaskRecord{}, err
+	}
+	existing.UpdatedTaskRecord.EndedAt = now
+	return s.repo.UpdateTask(ctx, existing, existing.UpdatedTaskRecord)
 }
 
 func (s *taskSvc) DeleteTask(ctx context.Context, id int) ([]daygo.ExistingTaskRecord, error) {
@@ -148,9 +155,12 @@ func (s *taskSvc) DeleteTask(ctx context.Context, id int) ([]daygo.ExistingTaskR
 }
 
 func (s *taskSvc) RenameTask(ctx context.Context, id int, newName string) (daygo.ExistingTaskRecord, error) {
-	return s.repo.UpdateTask(ctx, id, daygo.UpdatableFields{
-		Name: newName,
-	})
+	existing, err := s.repo.GetTask(ctx, id)
+	if err != nil {
+		return daygo.ExistingTaskRecord{}, err
+	}
+	existing.UpdatedTaskRecord.Name = newName
+	return s.repo.UpdateTask(ctx, existing, existing.UpdatedTaskRecord)
 }
 
 func (s *taskSvc) QueueTask(ctx context.Context, req queueTaskRequest) (daygo.ExistingTaskRecord, error) {

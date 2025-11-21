@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/benjamonnguyen/daygo"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/timer"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -404,7 +403,7 @@ func (m model) startNextTask() tea.Cmd {
 		if err != nil {
 			return warningAlert(err.Error())
 		}
-		if task == (daygo.ExistingTaskRecord{}) {
+		if task.ID == 0 {
 			return warningAlert("task queue is empty!")
 		}
 
@@ -506,7 +505,7 @@ func (m model) deleteLastPendingTaskItem() tea.Cmd {
 			lastItemID = n.ID
 		}
 
-		if _, err := m.taskSvc.DiscardTask(ctx, lastItemID); err != nil {
+		if _, err := m.taskSvc.DeleteTask(ctx, lastItemID); err != nil {
 			return warningAlert(err.Error())
 		}
 		return DeletePendingItemMsg{
@@ -532,7 +531,7 @@ func (m model) skipPendingTask() tea.Cmd {
 		if err != nil {
 			return warningAlert(err.Error())
 		}
-		if next == (daygo.ExistingTaskRecord{}) {
+		if next.ID == 0 {
 			return warningAlert("task queue is empty")
 		}
 		if err := m.taskSvc.SkipTask(ctx, t.ID); err != nil {
