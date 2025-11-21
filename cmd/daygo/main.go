@@ -87,6 +87,7 @@ func main() {
 		cmdTimeout: 3 * time.Second,
 		userinput:  userinput,
 		vp:         viewport.New(0, 0),
+		taskLog:    opts.tasks,
 	}
 
 	p := tea.NewProgram(m)
@@ -117,6 +118,7 @@ func configLogger(level string, w io.Writer) *slog.Logger {
 }
 
 type options struct {
+	tasks      []Task
 	showHelp   bool
 	shouldExit bool
 }
@@ -143,15 +145,14 @@ func parseProgramArgs(ctx context.Context, taskSvc TaskSvc) (options, error) {
 	case "/n", "":
 		if arg != "" {
 			t := TaskFromName(arg)
-			t.QueuedAt = time.Now()
-			_, err := taskSvc.UpsertTask(ctx, t)
-			return opts, err
+			t.StartedAt = time.Now()
+			opts.tasks = append(opts.tasks, t)
+			return opts, nil
 		}
 
 		return opts, nil
 	case "/a":
 		t := TaskFromName(arg)
-		t.QueuedAt = time.Now()
 		_, err := taskSvc.UpsertTask(ctx, t)
 		if err != nil {
 			return options{}, err
