@@ -4,21 +4,21 @@
 # Why?
 I need a system to...
   1. offload TODOs from my brain onto "paper"
-  2. minimize decision points so I can just focus on completing TODOs one after another
+  2. help me focus on completing those TODOs one after another
 
 In other words, "Load 'em up and knock 'em out!"
 
 After several attempts at bespoke TODO apps, I think the main failing is burdening the user (aka me) with too many decisions.
 
-The ability to set priority levels and tags requires the user to make additional decisions when adding tasks and again when selecting their next task. This takes up a significant amount of mental energy, making these features counterproductive toward the ultimate goal of getting things done.
+DayGo is yet another experiment: task queues.
 
-DayGo is yet another experiment: a first-in-first-out task list.
-
-Rather than being presented with the list, queued tasks are doled out one at a time in the order they were added.
+Rather than being presented with the list, tasks are doled out one at a time in the order they were added.
 
 Your only decisions are to do, skip, or discard the task.
 
 Prioritization and pruning are therefore naturally baked into this simple decision flow.
+
+Tags can be used to create filtered queues.
 
 What this tool is NOT meant to be is a planner or calendar and should not be used for tasks that have a definitive deadline or scheduled time.
 
@@ -33,6 +33,9 @@ What this tool is NOT meant to be is a planner or calendar and should not be use
 [07:30] ────────────────────────────────┘
 
 > |
+
+#daygo #housework
+
 (ctrl+c to quit)
 ```
 
