@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/benjamonnguyen/daygo"
 	"github.com/benjamonnguyen/daygo/sqlite"
 	dsdb "github.com/benjamonnguyen/deadsimple/database/sqlite"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -26,7 +25,7 @@ var migrations embed.FS
 
 func main() {
 	// conf
-	conf := daygo.LoadConfig()
+	conf := LoadConfig()
 	f, err := os.OpenFile(conf.LogPath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o666)
 	if err != nil {
 		panic(err)
