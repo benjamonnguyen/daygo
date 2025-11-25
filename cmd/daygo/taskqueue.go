@@ -13,10 +13,13 @@ type TaskQueue interface {
 	Queue(t Task) Task
 	Size() int
 	SetFilter(tag string)
+	FilterTag() string
+	AllTags() []string
 }
 
 type taskQueue struct {
-	currentTag string
+	filterTag    string
+	tagToTaskCnt map[string]int
 
 	allTasks      []Task
 	filteredTasks []Task
@@ -33,19 +36,27 @@ func NewTaskQueue(tasks []Task) TaskQueue {
 		return 0
 	})
 
+	tagToTaskCnt := make(map[string]int)
+	for _, task := range tasks {
+		for _, tag := range task.Tags {
+			tagToTaskCnt[tag] += 1
+		}
+	}
+
 	return &taskQueue{
 		allTasks:      tasks,
 		filteredTasks: tasks,
+		tagToTaskCnt:  tagToTaskCnt,
 	}
 }
 
 func (tm *taskQueue) filter() {
-	if tm.currentTag == "" {
+	if tm.filterTag == "" {
 		tm.filteredTasks = tm.allTasks
 	} else {
 		var filtered []Task
 		for _, task := range tm.allTasks {
-			if slices.Contains(task.Tags, tm.currentTag) {
+			if slices.Contains(task.Tags, tm.filterTag) {
 				filtered = append(filtered, task)
 			}
 		}
@@ -54,16 +65,28 @@ func (tm *taskQueue) filter() {
 }
 
 func (tm *taskQueue) SetFilter(tag string) {
-	tm.currentTag = tag
+	tm.filterTag = tag
 	tm.filter()
 }
 
+func (tm *taskQueue) FilterTag() string {
+	return tm.filterTag
+}
+
 func (tm *taskQueue) CurrentTag() string {
-	return tm.currentTag
+	return tm.filterTag
 }
 
 func (tm *taskQueue) Tasks() []Task {
 	return tm.filteredTasks
+}
+
+func (tm *taskQueue) AllTags() []string {
+	tags := make([]string, 0, len(tm.tagToTaskCnt))
+	for tag := range tm.tagToTaskCnt {
+		tags = append(tags, tag)
+	}
+	return tags
 }
 
 func (tm *taskQueue) Size() int {
@@ -73,6 +96,9 @@ func (tm *taskQueue) Size() int {
 func (tm *taskQueue) Queue(t Task) Task {
 	t.QueuedAt = time.Now()
 	tm.allTasks = append([]Task{t}, tm.allTasks...)
+	for _, tag := range t.Tags {
+		tm.tagToTaskCnt[tag] += 1
+	}
 	tm.filter()
 	return t
 }
@@ -84,6 +110,14 @@ func (tm *taskQueue) Dequeue() Task {
 	tm.allTasks = slices.DeleteFunc(tm.allTasks, func(t Task) bool {
 		return t.ID == task.ID
 	})
+
+	for _, tag := range task.Tags {
+		if tm.tagToTaskCnt[tag] == 1 {
+			delete(tm.tagToTaskCnt, tag)
+		} else {
+			tm.tagToTaskCnt[tag] -= 1
+		}
+	}
 
 	return task
 }

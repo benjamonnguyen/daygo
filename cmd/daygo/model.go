@@ -58,13 +58,11 @@ type model struct {
 	taskSvc TaskSvc
 
 	// state
-	taskQueue    TaskQueue
-	taskLog      []Task
-	currentTag   string
-	tagToTaskCnt map[string]int
-	alerts       []string
-	quitting     bool
-	h            int
+	taskQueue TaskQueue
+	taskLog   []Task
+	alerts    []string
+	quitting  bool
+	h         int
 
 	// configuration
 	cmdTimeout time.Duration
@@ -130,16 +128,7 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 	case InitTaskQueueMsg:
 		m.taskQueue = NewTaskQueue(msg.tasks)
 
-		m.tagToTaskCnt = make(map[string]int)
-		for _, task := range msg.tasks {
-			m.addTags(task.Tags)
-		}
-
-		if len(m.taskLog) > 0 {
-			for _, task := range m.taskLog {
-				m.addTags(task.Tags)
-			}
-		} else if m.taskQueue.Size() > 0 {
+		if len(m.taskLog) == 0 && m.taskQueue.Size() > 0 {
 			t := m.taskQueue.Dequeue()
 			t.StartedAt = time.Now()
 			m.taskLog = append(m.taskLog, t)
@@ -172,14 +161,6 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) tags() []string {
-	tags := make([]string, 0, len(m.tagToTaskCnt))
-	for tag := range m.tagToTaskCnt {
-		tags = append(tags, tag)
-	}
-	return tags
-}
-
 func (m model) initTaskQueue() tea.Msg {
 	timeout, cancel := m.newTimeout()
 	defer cancel()
@@ -193,22 +174,6 @@ func (m model) initTaskQueue() tea.Msg {
 
 	return InitTaskQueueMsg{
 		tasks: tasks,
-	}
-}
-
-func (m *model) addTags(tags []string) {
-	for _, tag := range tags {
-		m.tagToTaskCnt[tag] += 1
-	}
-}
-
-func (m *model) removeTags(tags []string) {
-	for _, tag := range tags {
-		if m.tagToTaskCnt[tag] == 1 {
-			delete(m.tagToTaskCnt, tag)
-		} else {
-			m.tagToTaskCnt[tag] += 1
-		}
 	}
 }
 
@@ -255,7 +220,7 @@ func (m model) renderFooter() string {
 		showQuit = false
 	}
 
-	if len(m.tagToTaskCnt) > 0 {
+	if m.taskQueue != nil && len(m.taskQueue.AllTags()) > 0 {
 		footer.WriteString(m.renderTags())
 		footer.WriteString("\n\n")
 	}
@@ -269,7 +234,7 @@ func (m model) renderFooter() string {
 }
 
 func (m model) renderTags() string {
-	tags := m.tags()
+	tags := m.taskQueue.AllTags()
 	if len(tags) == 0 {
 		return ""
 	}
@@ -287,7 +252,7 @@ func (m model) renderTags() string {
 
 		// Apply styling
 		var styledTag string
-		if tag == m.currentTag {
+		if tag == m.taskQueue.FilterTag() {
 			styledTag = colorize(colorCyan, tagText)
 		} else {
 			styledTag = faintStyle.Render(tagText)
@@ -349,8 +314,6 @@ func (m *model) endPendingTask() (Task, error) {
 		n.EndedAt = now
 	}
 
-	m.removeTags(t.Tags)
-
 	return *t, nil
 }
 
@@ -384,7 +347,6 @@ func (m *model) startNewTask(task string) Task {
 	_, _ = m.endPendingTask()
 	t := TaskFromName(task)
 	t.StartedAt = time.Now()
-	m.addTags(t.Tags)
 	m.taskLog = append(m.taskLog, t)
 	return t
 }
@@ -420,7 +382,6 @@ func (m *model) deleteLastPendingTaskItem() int {
 
 func (m *model) removeCurrentTask() Task {
 	if t := m.currentTask(); t != nil {
-		m.removeTags(t.Tags)
 		m.taskLog = m.taskLog[:len(m.taskLog)-1]
 		return *t
 	}
@@ -462,18 +423,11 @@ func (m *model) editPendingItem(edit string) *Task {
 	if n := t.LastNote(); n != nil {
 		n.Name = edit
 	} else {
-		m.removeTags(t.Tags)
 		t.Name = edit
 		t.Tags = extractTags(edit)
-		m.addTags(t.Tags)
 		return t
 	}
 	return nil
-}
-
-func (m *model) queue(task Task) Task {
-	m.addTags(task.Tags)
-	return m.taskQueue.Queue(task)
 }
 
 func (m model) handleInput(input string) (model, tea.Cmd) {
@@ -492,7 +446,6 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 				started = m.taskQueue.Dequeue()
 			} else {
 				started = TaskFromName(parts[1])
-				m.addTags(started.Tags)
 			}
 
 			ended, _ := m.endPendingTask()
@@ -554,7 +507,7 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 				m.addAlert("usage: /a <task>", colorYellow)
 				return m, nil
 			}
-			t := m.queue(TaskFromName(parts[1]))
+			t := m.taskQueue.Queue(TaskFromName(parts[1]))
 			return m, func() tea.Msg {
 				timeout, c := m.newTimeout()
 				defer c()
@@ -576,7 +529,7 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 				t := m.taskQueue.Dequeue()
 				m.taskLog = append(m.taskLog, t)
 			}
-			queued := m.queue(curr)
+			queued := m.taskQueue.Queue(curr)
 
 			return m, func() tea.Msg {
 				timeout, c := m.newTimeout()
@@ -597,11 +550,10 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 			return m, m.tbTimer.Init()
 		case "/f":
 			if len(parts) < 2 {
-				m.currentTag = ""
+				m.taskQueue.SetFilter("")
 			} else {
-				m.currentTag = parts[1]
+				m.taskQueue.SetFilter(parts[1])
 			}
-			m.taskQueue.SetFilter(m.currentTag)
 			return m, nil
 		case "/o":
 			return m, func() tea.Msg {
