@@ -2,64 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"io"
+	"fmt"
 	"net/http"
-	"os"
-	"path"
-	"sync"
-
-	"github.com/charmbracelet/log"
+	"time"
 
 	"github.com/benjamonnguyen/daygo"
-	"github.com/benjamonnguyen/daygo/sqlite"
-	dsdb "github.com/benjamonnguyen/deadsimple/database/sqlite"
 )
-
-var (
-	logger daygo.Logger
-)
-
-func main() {
-	confDir, _ := os.UserConfigDir()
-	cfg, err := LoadConf(path.Join(confDir, "daygo", "daygosync.conf"))
-	if err != nil {
-		panic(err)
-	}
-	if err := cfg.Get(KeyDbUrl, &dbURL); err != nil {
-		panic(err)
-	}
-	logger = Logger(cfg)
-
-	// db
-	var dbURL string
-	if err := cfg.Get(KeyDatabaseURL, &dbURL); err != nil {
-		panic(err)
-	}
-
-	db, err := dsdb.Open(dbURL)
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close() //nolint:errcheck
-
-	// repos
-	taskRepo := sqlite.NewTaskRepo(db.DB(), logger)
-		logger = log.New(os.Stdout)
-	}
-
-	// routes
-	c := &controller{}
-	http.HandleFunc("POST /sync", c.Sync)
-
-	// Start the server
-	var port string
-	if err := cfg.Get(KeyPort, &port); err != nil {
-		panic(err)
-	}
-
-	logger.Info("Starting sync server on port %s", port)
-	logger.Fatal(http.ListenAndServe(":"+port, nil))
-}
 
 type controller struct {
 	taskRepo daygo.TaskRepo
@@ -111,4 +59,3 @@ func handleSyncPost(w http.ResponseWriter, r *http.Request, taskRepo daygo.TaskR
 		http.Error(w, fmt.Sprintf("Failed to encode response: %v", err), http.StatusInternalServerError)
 	}
 }
-

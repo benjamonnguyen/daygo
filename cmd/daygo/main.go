@@ -31,26 +31,26 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 	logger = configLogger(conf.LogLevel, f)
 	logger.Info("loaded config", "config", conf)
 
-	// db
-	db, err := dsdb.Open(conf.DatabaseURL)
+	// conn
+	conn, err := dsdb.Open(conf.DatabaseURL)
 	if err != nil {
 		logger.Error("failed database open", "error", err)
 		os.Exit(1)
 	}
-	if err := db.RunMigrations(migrations); err != nil {
+	if err := conn.RunMigrations(migrations); err != nil {
 		logger.Error("failed migration", "error", err)
 		os.Exit(1)
 	}
 	defer func() {
-		_ = db.Close()
+		_ = conn.Close()
 	}()
 
 	// repos
-	taskRepo := sqlite.NewTaskRepo(db.Conn(), logger)
+	taskRepo := sqlite.NewTaskRepo(conn.DB(), logger)
 
 	// svcs
 	taskSvc := NewTaskSvc(taskRepo)

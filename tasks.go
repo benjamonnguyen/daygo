@@ -8,6 +8,7 @@ import (
 type TaskRepo interface {
 	GetTask(context.Context, int) (ExistingTaskRecord, error)
 	GetTasks(context.Context, []any) ([]ExistingTaskRecord, error)
+	GetAllTasks(ctx context.Context) ([]ExistingTaskRecord, error)
 	GetByParentID(context.Context, int) ([]ExistingTaskRecord, error)
 	GetByStartTime(ctx context.Context, min, max time.Time) ([]ExistingTaskRecord, error)
 	InsertTask(context.Context, TaskRecord) (ExistingTaskRecord, error)

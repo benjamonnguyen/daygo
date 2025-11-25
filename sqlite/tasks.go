@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/benjamonnguyen/daygo"
@@ -30,12 +29,12 @@ type taskEntity struct {
 // taskRepo
 type taskRepo struct {
 	db *sql.DB
-	l  *slog.Logger
+	l  daygo.Logger
 }
 
 var _ daygo.TaskRepo = (*taskRepo)(nil)
 
-func NewTaskRepo(db *sql.DB, logger *slog.Logger) daygo.TaskRepo {
+func NewTaskRepo(db *sql.DB, logger daygo.Logger) daygo.TaskRepo {
 	return &taskRepo{
 		l:  logger,
 		db: db,
@@ -60,6 +59,15 @@ func (r *taskRepo) GetTask(ctx context.Context, id int) (daygo.ExistingTaskRecor
 		return task, ErrNotFound
 	}
 	return task, nil
+}
+
+func (r taskRepo) GetAllTasks(ctx context.Context) ([]daygo.ExistingTaskRecord, error) {
+	rows, err := r.db.QueryContext(ctx, SelectAll)
+	if err != nil {
+		return nil, err
+	}
+
+	return extractTasks(rows)
 }
 
 func (r taskRepo) GetTasks(ctx context.Context, ids []any) ([]daygo.ExistingTaskRecord, error) {
