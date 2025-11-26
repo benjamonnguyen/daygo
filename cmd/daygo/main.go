@@ -5,20 +5,21 @@ import (
 	"embed"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/benjamonnguyen/daygo"
 	"github.com/benjamonnguyen/daygo/sqlite"
 	dsdb "github.com/benjamonnguyen/deadsimple/database/sqlite"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/log"
 )
 
-var logger *slog.Logger
+var logger daygo.Logger
 
 //go:embed migrations/*.sql
 var migrations embed.FS
@@ -95,25 +96,15 @@ func main() {
 	}
 }
 
-func configLogger(level string, w io.Writer) *slog.Logger {
-	var lvl slog.Level
-	switch level {
-	case "DEBUG":
-		lvl = slog.LevelDebug
-	case "INFO":
-		lvl = slog.LevelInfo
-	case "WARN":
-		lvl = slog.LevelWarn
-	case "ERROR":
-		lvl = slog.LevelError
+func configLogger(level string, w io.Writer) daygo.Logger {
+	lvl, err := log.ParseLevel(level)
+	if err != nil {
+		panic(err)
 	}
 
-	handler := slog.NewTextHandler(w, &slog.HandlerOptions{
-		Level:     lvl,
-		AddSource: true,
+	return log.NewWithOptions(w, log.Options{
+		Level: lvl,
 	})
-
-	return slog.New(handler)
 }
 
 type options struct {

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"regexp"
 	"slices"
 	"strings"
@@ -54,7 +53,7 @@ type model struct {
 	tbTimer   timeBlockTimer
 
 	// supplied
-	l       *slog.Logger
+	l       daygo.Logger
 	taskSvc TaskSvc
 
 	// state
