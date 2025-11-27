@@ -28,4 +28,5 @@ type ExistingTaskRecord struct {
 	TaskRecord
 	ID        int
 	CreatedAt time.Time
+	UpdatedAt time.Time
 }

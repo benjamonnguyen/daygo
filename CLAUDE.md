@@ -10,3 +10,6 @@
 # Repository layer
 - Record contains fields for initial creation of entity
 - ExistingRecord contains auto-populated fields like ID and CreatedAt
+
+# Migrations
+- Add migrations with `migrate create -ext sql -dir cmd/daygo/migrations -seq <name>`
