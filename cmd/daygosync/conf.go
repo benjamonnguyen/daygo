@@ -46,8 +46,9 @@ func LoadConf(src string) (config.Config, error) {
 func Logger(cfg config.Config) daygo.Logger {
 	var w io.Writer = os.Stdout
 	var logPath, logLvl string
-	_ = cfg.Get(KeyLogPath, &logPath)
-	_ = cfg.Get(KeyLogLevel, &logLvl)
+	if err := cfg.GetMany([]config.Key{KeyLogPath, KeyLogLevel}, &logPath, &logLvl); err != nil {
+		panic(err)
+	}
 	if logPath != "" {
 		f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE, 0o644)
 		if err != nil {
