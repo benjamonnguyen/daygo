@@ -22,6 +22,7 @@ replace github.com/benjamonnguyen/deadsimple/database v0.0.0 => ../deadsimple/da
 replace github.com/benjamonnguyen/deadsimple/config v0.0.0 => ../deadsimple/config
 
 require (
+	github.com/Thiht/transactor v1.1.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect

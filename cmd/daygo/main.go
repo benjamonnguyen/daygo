@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	txStdLib "github.com/Thiht/transactor/stdlib"
 	"github.com/benjamonnguyen/daygo"
 	"github.com/benjamonnguyen/daygo/sqlite"
 	dsdb "github.com/benjamonnguyen/deadsimple/database/sqlite"
@@ -35,7 +36,7 @@ func main() {
 	logger = configLogger(conf.LogLevel, f)
 	logger.Info("loaded config", "config", conf)
 
-	// conn
+	// db
 	conn, err := dsdb.Open(conf.DatabaseURL)
 	if err != nil {
 		logger.Error("failed database open", "error", err)
@@ -45,12 +46,12 @@ func main() {
 		logger.Error("failed migration", "error", err)
 		os.Exit(1)
 	}
-	defer func() {
-		_ = conn.Close()
-	}()
+	defer conn.Close() //nolint:errcheck
+
+	_, dbGetter := txStdLib.NewTransactor(conn.DB(), txStdLib.NestedTransactionsSavepoints)
 
 	// repos
-	taskRepo := sqlite.NewTaskRepo(conn.DB(), logger)
+	taskRepo := sqlite.NewTaskRepo(dbGetter, logger)
 
 	// svcs
 	taskSvc := NewTaskSvc(taskRepo)

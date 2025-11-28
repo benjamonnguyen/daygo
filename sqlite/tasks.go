@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"time"
 
+	txStdLib "github.com/Thiht/transactor/stdlib"
+
 	"github.com/benjamonnguyen/daygo"
 )
 
@@ -29,16 +31,16 @@ type taskEntity struct {
 
 // taskRepo
 type taskRepo struct {
-	db *sql.DB
-	l  daygo.Logger
+	dbGetter txStdLib.DBGetter
+	l        daygo.Logger
 }
 
 var _ daygo.TaskRepo = (*taskRepo)(nil)
 
-func NewTaskRepo(db *sql.DB, logger daygo.Logger) daygo.TaskRepo {
+func NewTaskRepo(dbGetter txStdLib.DBGetter, logger daygo.Logger) daygo.TaskRepo {
 	return &taskRepo{
-		l:  logger,
-		db: db,
+		l:        logger,
+		dbGetter: dbGetter,
 	}
 }
 
@@ -47,7 +49,8 @@ func (r *taskRepo) GetTask(ctx context.Context, id int) (daygo.ExistingTaskRecor
 		return daygo.ExistingTaskRecord{}, fmt.Errorf("provide id")
 	}
 
-	row := r.db.QueryRowContext(
+	db := r.dbGetter(ctx)
+	row := db.QueryRowContext(
 		ctx,
 		fmt.Sprintf("%s WHERE id=?", SelectAll), id,
 	)
@@ -63,7 +66,8 @@ func (r *taskRepo) GetTask(ctx context.Context, id int) (daygo.ExistingTaskRecor
 }
 
 func (r taskRepo) GetAllTasks(ctx context.Context) ([]daygo.ExistingTaskRecord, error) {
-	rows, err := r.db.QueryContext(ctx, SelectAll)
+	db := r.dbGetter(ctx)
+	rows, err := db.QueryContext(ctx, SelectAll)
 	if err != nil {
 		return nil, err
 	}
@@ -76,9 +80,10 @@ func (r taskRepo) GetTasks(ctx context.Context, ids []any) ([]daygo.ExistingTask
 		return nil, fmt.Errorf("provide ids")
 	}
 
+	db := r.dbGetter(ctx)
 	query := fmt.Sprintf("%s WHERE id IN %s", SelectAll, generateParameters(len(ids)))
 	r.l.Debug("getting tasks", "query", query)
-	rows, err := r.db.QueryContext(ctx, query, ids...)
+	rows, err := db.QueryContext(ctx, query, ids...)
 	if err != nil {
 		return nil, err
 	}
@@ -99,8 +104,9 @@ func (r *taskRepo) GetByStartTime(ctx context.Context, min, max time.Time) ([]da
 		query += " WHERE started_at ISNULL"
 	}
 
+	db := r.dbGetter(ctx)
 	r.l.Debug("GetByStartTime", "query", query)
-	rows, err := r.db.QueryContext(ctx, query)
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -113,14 +119,15 @@ func (r *taskRepo) GetByParentID(ctx context.Context, parentID int) ([]daygo.Exi
 		return nil, fmt.Errorf("provide parentID")
 	}
 
-	rows, err := r.db.QueryContext(
+	db := r.dbGetter(ctx)
+	rows, err := db.QueryContext(
 		ctx,
 		fmt.Sprintf("%s WHERE parent_id=?", SelectAll), parentID,
 	)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() //nolint:errcheck
 
 	var subtasks []daygo.ExistingTaskRecord
 	for rows.Next() {
@@ -160,6 +167,7 @@ func (r *taskRepo) InsertTask(ctx context.Context, task daygo.TaskRecord) (daygo
 		return daygo.ExistingTaskRecord{}, fmt.Errorf("provide required field 'Name'")
 	}
 
+	db := r.dbGetter(ctx)
 	now := time.Now()
 	e := mapToTaskEntity(daygo.ExistingTaskRecord{
 		TaskRecord: task,
@@ -169,7 +177,7 @@ func (r *taskRepo) InsertTask(ctx context.Context, task daygo.TaskRecord) (daygo
 
 	query := `INSERT INTO tasks (name, parent_id, started_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`
 	r.l.Debug("creating task", "query", query, "entity", e)
-	res, err := r.db.ExecContext(ctx, query, e.Name, e.ParentID, e.StartedAt, e.CreatedAt, e.UpdatedAt)
+	res, err := db.ExecContext(ctx, query, e.Name, e.ParentID, e.StartedAt, e.CreatedAt, e.UpdatedAt)
 	if err != nil {
 		return daygo.ExistingTaskRecord{}, err
 	}
@@ -192,7 +200,9 @@ func (r *taskRepo) UpdateTask(ctx context.Context, id int, updated daygo.TaskRec
 	existing.TaskRecord = updated
 	existing.UpdatedAt = time.Now()
 	e := mapToTaskEntity(existing)
-	_, err = r.db.ExecContext(
+
+	db := r.dbGetter(ctx)
+	_, err = db.ExecContext(
 		ctx,
 		`UPDATE tasks
 		SET ended_at = ?, name = ?, started_at = ?, updated_at = ?
@@ -216,16 +226,17 @@ func (r *taskRepo) DeleteTasks(ctx context.Context, ids []any) ([]daygo.Existing
 		return nil, fmt.Errorf("expected %d existing tasks, found %d", len(ids), len(toDelete))
 	}
 
+	db := r.dbGetter(ctx)
 	query := fmt.Sprintf("DELETE FROM tasks WHERE id IN %s", generateParameters(len(ids)))
 	r.l.Debug("deleting tasks", "query", query, "ids", ids)
-	if _, err := r.db.ExecContext(ctx, query, ids...); err != nil {
+	if _, err := db.ExecContext(ctx, query, ids...); err != nil {
 		return nil, err
 	}
 
 	// cascade delete subtasks
 	query = fmt.Sprintf("DELETE FROM tasks WHERE parent_id IN %s", generateParameters(len(ids)))
 	r.l.Debug("deleting subtasks", "query", query)
-	if _, err := r.db.ExecContext(ctx, query, ids...); err != nil {
+	if _, err := db.ExecContext(ctx, query, ids...); err != nil {
 		return nil, err
 	}
 

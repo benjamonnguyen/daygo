@@ -1,6 +1,8 @@
 package sqlite
 
-import "strings"
+import (
+	"strings"
+)
 
 type scannable interface {
 	Scan(...any) error

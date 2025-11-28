@@ -5,6 +5,8 @@ import (
 	"os"
 	"path"
 
+	txStdLib "github.com/Thiht/transactor/stdlib"
+
 	"github.com/benjamonnguyen/daygo/sqlite"
 	"github.com/benjamonnguyen/deadsimple/config"
 	dsdb "github.com/benjamonnguyen/deadsimple/database/sqlite"
@@ -27,18 +29,20 @@ func main() {
 	logger := Logger(cfg)
 
 	// db
-	db, err := dsdb.Open(dbURL)
+	conn, err := dsdb.Open(dbURL)
 	if err != nil {
 		panic(err)
 	}
-	defer db.Close() //nolint:errcheck
+	defer conn.Close() //nolint:errcheck
+	transactor, dbGetter := txStdLib.NewTransactor(conn.DB(), txStdLib.NestedTransactionsSavepoints)
 
 	// repos
-	taskRepo := sqlite.NewTaskRepo(db.DB(), logger)
+	taskRepo := sqlite.NewTaskRepo(dbGetter, logger)
 
 	// routes
 	var c SyncController = &controller{
-		taskRepo: taskRepo,
+		transactor: transactor,
+		taskRepo:   taskRepo,
 	}
 
 	http.HandleFunc("POST /sync", c.Sync)
