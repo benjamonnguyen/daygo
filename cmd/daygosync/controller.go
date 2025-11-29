@@ -19,10 +19,11 @@ type SyncController interface {
 type controller struct {
 	transactor transactor.Transactor
 	taskRepo   daygo.TaskRepo
+	logger     daygo.Logger
 }
 
 type SyncRequest struct {
-	LastSyncedAt time.Time                  `json:"last_synced_at"`
+	LastSyncTime time.Time                  `json:"last_sync_time"`
 	ClientTasks  []daygo.ExistingTaskRecord `json:"client_tasks"`
 }
 
@@ -51,40 +52,53 @@ func (c *controller) Sync(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	c.logger.Info("Sync", "request", syncReq)
 
 	// Validate request
-	if syncReq.LastSyncedAt.IsZero() {
-		http.Error(w, "LastSyncedAt field is required", http.StatusBadRequest)
+	if syncReq.LastSyncTime.IsZero() {
+		c.logAndWriteError(w, &httpError{http.StatusBadRequest, "LastSyncTime field is required"})
 		return
 	}
 
 	// Process client tasks with conflict resolution within transaction
 	err := c.transactor.WithinTransaction(r.Context(), c.syncClientTasks(r.Context(), syncReq.ClientTasks))
-	if err != nil {
-		var httpErr httpError
-		if errors.As(err, &httpErr) {
-			http.Error(w, "Failed to sync client tasks: "+httpErr.msg, httpErr.code)
-		} else {
-			http.Error(w, "Failed to sync client tasks: "+err.Error(), http.StatusInternalServerError)
-		}
+	if c.logAndWriteError(w, err) {
 		return
 	}
 
 	// Return server tasks to client
-	serverTasks, err := c.taskRepo.GetByCreatedTime(r.Context(), syncReq.LastSyncedAt, time.Time{})
+	serverTasks, err := c.taskRepo.GetByCreatedTime(r.Context(), syncReq.LastSyncTime, time.Time{})
 	if err != nil {
-		http.Error(w, "Failed to get server tasks: "+err.Error(), http.StatusInternalServerError)
+		httpErr := httpError{
+			msg: "failed to get server tasks: " + err.Error(),
+		}
+		c.logAndWriteError(w, httpErr)
 		return
 	}
 	response := SyncResponse{
 		ServerTasks: serverTasks,
 	}
+	c.logger.Info("Sync", "response", response)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "Failed to encode response: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+}
+
+func (c *controller) logAndWriteError(w http.ResponseWriter, err error) bool {
+	if err == nil {
+		return false
+	}
+	var httpErr httpError
+	if errors.As(err, &httpErr) {
+		http.Error(w, httpErr.msg, httpErr.code)
+	} else {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	c.logger.Error(err.Error())
+	return true
 }
 
 func (c *controller) syncClientTasks(ctx context.Context, tasks []daygo.ExistingTaskRecord) func(context.Context) error {
@@ -96,12 +110,16 @@ func (c *controller) syncClientTasks(ctx context.Context, tasks []daygo.Existing
 			}
 		}
 
-		existingTasks, err := c.taskRepo.GetTasks(ctx, existingTaskIDs)
-		if err != nil {
-			return httpError{
-				code: http.StatusInternalServerError,
-				msg:  "Failed to get existing tasks: " + err.Error(),
+		var existingTasks []daygo.ExistingTaskRecord
+		if len(existingTaskIDs) > 0 {
+			existing, err := c.taskRepo.GetTasks(ctx, existingTaskIDs)
+			if err != nil {
+				return httpError{
+					code: http.StatusInternalServerError,
+					msg:  "Failed to get existing tasks: " + err.Error(),
+				}
 			}
+			existingTasks = existing
 		}
 
 		taskIDToExistingRecord := make(map[int]daygo.ExistingTaskRecord)
