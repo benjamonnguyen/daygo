@@ -1,14 +1,11 @@
 package main
 
 import (
-	"io"
 	"os"
 	"path"
 
-	"github.com/benjamonnguyen/daygo"
 	"github.com/benjamonnguyen/deadsimple/config"
 	"github.com/benjamonnguyen/deadsimple/config/env"
-	"github.com/charmbracelet/log"
 )
 
 const (
@@ -41,29 +38,4 @@ func LoadConf(src string) (config.Config, error) {
 	}
 
 	return env.NewConfig(src, entries...)
-}
-
-func Logger(cfg config.Config) daygo.Logger {
-	var w io.Writer = os.Stdout
-	var logPath, logLvl string
-	if err := cfg.GetMany([]config.Key{KeyLogPath, KeyLogLevel}, &logPath, &logLvl); err != nil {
-		panic(err)
-	}
-	if logPath != "" {
-		f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE, 0o644)
-		if err != nil {
-			panic(err)
-		}
-		defer f.Close() //nolint:errcheck
-		w = f
-	}
-
-	lvl, err := log.ParseLevel(logLvl)
-	if err != nil {
-		panic(err)
-	}
-
-	return log.NewWithOptions(w, log.Options{
-		Level: lvl,
-	})
 }

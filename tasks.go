@@ -14,7 +14,8 @@ type TaskRepo interface {
 	GetAllTasks(ctx context.Context) ([]ExistingTaskRecord, error)
 	GetByParentID(context.Context, uuid.UUID) ([]ExistingTaskRecord, error)
 	GetByStartTime(ctx context.Context, min, max time.Time) ([]ExistingTaskRecord, error)
-	GetByCreatedTime(ctx context.Context, min, max time.Time) ([]ExistingTaskRecord, error)
+	GetByCreateTime(ctx context.Context, min, max time.Time) ([]ExistingTaskRecord, error)
+	GetByUpdateTime(ctx context.Context, min, max time.Time) ([]ExistingTaskRecord, error)
 
 	//
 	InsertTask(context.Context, TaskRecord) (ExistingTaskRecord, error)

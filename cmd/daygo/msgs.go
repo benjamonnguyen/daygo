@@ -11,3 +11,8 @@ type EndProgramMsg struct {
 type ErrorMsg struct {
 	err error
 }
+
+type SyncMsg struct {
+	tasksToQueue []Task
+	error        string
+}

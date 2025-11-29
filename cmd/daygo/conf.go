@@ -8,13 +8,6 @@ import (
 	"github.com/benjamonnguyen/deadsimple/config/env"
 )
 
-type Config struct {
-	DatabaseURL string
-	LogLevel    string
-	LogPath     string
-	TimeFormat  string
-}
-
 const (
 	KeyDatabaseURL   config.Key = "DAYGO_DB_URL"
 	KeyLogLevel      config.Key = "DAYGO_LOG_LEVEL"
