@@ -22,12 +22,12 @@ type controller struct {
 }
 
 type SyncRequest struct {
-	LastSyncedAt time.Time
-	ClientTasks  []daygo.ExistingTaskRecord
+	LastSyncedAt time.Time                  `json:"last_synced_at"`
+	ClientTasks  []daygo.ExistingTaskRecord `json:"client_tasks"`
 }
 
 type SyncResponse struct {
-	ServerTasks []daygo.ExistingTaskRecord
+	ServerTasks []daygo.ExistingTaskRecord `json:"server_tasks"`
 }
 
 type httpError struct {
@@ -71,7 +71,7 @@ func (c *controller) Sync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return server tasks to client
-	serverTasks, err := c.taskRepo.GetByStartTime(r.Context(), syncReq.LastSyncedAt, time.Now())
+	serverTasks, err := c.taskRepo.GetByCreatedTime(r.Context(), syncReq.LastSyncedAt, time.Time{})
 	if err != nil {
 		http.Error(w, "Failed to get server tasks: "+err.Error(), http.StatusInternalServerError)
 		return

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path"
@@ -26,7 +27,6 @@ func main() {
 	}, &dbURL, &port); err != nil {
 		panic(err)
 	}
-	logger := Logger(cfg)
 
 	// db
 	conn, err := dsdb.Open(dbURL)
@@ -37,7 +37,7 @@ func main() {
 	transactor, dbGetter := txStdLib.NewTransactor(conn.DB(), txStdLib.NestedTransactionsSavepoints)
 
 	// repos
-	taskRepo := sqlite.NewTaskRepo(dbGetter, logger)
+	taskRepo := sqlite.NewTaskRepo(dbGetter, nil)
 
 	// routes
 	var c SyncController = &controller{
@@ -48,6 +48,6 @@ func main() {
 	http.HandleFunc("POST /sync", c.Sync)
 
 	// Start the server
-	logger.Info("Starting sync server on port %s", port)
-	logger.Fatal(http.ListenAndServe(":"+port, nil))
+	fmt.Printf("Starting sync server on port %s\n", port)
+	fmt.Println(http.ListenAndServe(":"+port, nil))
 }

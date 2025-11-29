@@ -141,6 +141,31 @@ func (r *taskRepo) GetByParentID(ctx context.Context, parentID int) ([]daygo.Exi
 	return subtasks, nil
 }
 
+func (r *taskRepo) GetByCreatedTime(ctx context.Context, min, max time.Time) ([]daygo.ExistingTaskRecord, error) {
+	query := SelectAll
+	var args []any
+
+	if !min.IsZero() && !max.IsZero() {
+		query += " WHERE created_at BETWEEN ? AND ?"
+		args = append(args, min.Unix(), max.Unix())
+	} else if !min.IsZero() {
+		query += " WHERE created_at >= ?"
+		args = append(args, min.Unix())
+	} else if !max.IsZero() {
+		query += " WHERE created_at <= ?"
+		args = append(args, max.Unix())
+	}
+
+	db := r.dbGetter(ctx)
+	r.l.Debug("GetByCreatedTime", "query", query, "args", args)
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	return extractTasks(rows)
+}
+
 func extractTasks(rows *sql.Rows) ([]daygo.ExistingTaskRecord, error) {
 	var tasks []daygo.ExistingTaskRecord
 	for rows.Next() {
