@@ -6,38 +6,64 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"strings"
 	"time"
 
 	txStdLib "github.com/Thiht/transactor/stdlib"
 	"github.com/benjamonnguyen/daygo"
+	"github.com/benjamonnguyen/daygo/charmlog"
 	"github.com/benjamonnguyen/daygo/sqlite"
+	"github.com/benjamonnguyen/deadsimple/config"
 	dsdb "github.com/benjamonnguyen/deadsimple/database/sqlite"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/log"
 )
-
-var logger daygo.Logger
 
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+var logger daygo.Logger
+
 func main() {
-	// conf
-	conf := LoadConfig()
-	f, err := os.OpenFile(conf.LogPath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o666)
+	// cfg
+	cfgDir, _ := os.UserConfigDir()
+	cfg, err := LoadConf(path.Join(cfgDir, "daygo", "daygo.conf"))
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close() //nolint:errcheck
-	logger = configLogger(conf.LogLevel, f)
-	logger.Info("loaded config", "config", conf)
+	var logPath, logLvl, dbURL, timeFormat, syncServerURL, syncRate string
+	if err := cfg.GetMany([]config.Key{
+		KeyLogPath,
+		KeyLogLevel,
+		KeyDatabaseURL,
+		KeyTimeFormat,
+		KeySyncServerURL,
+		KeySyncRate,
+	}, &logPath, &logLvl, &dbURL, &timeFormat, &syncServerURL, &syncRate); err != nil {
+		panic(err)
+	}
+	sr, err := time.ParseDuration(syncRate)
+	if err != nil {
+		panic(err)
+	}
+
+	// logger
+	var w io.Writer
+	if logPath != "" {
+		f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE, 0o644)
+		if err != nil {
+			panic(err)
+		}
+		defer f.Close() //nolint:errcheck
+	}
+	logger = charmlog.NewLogger(charmlog.Options{
+		Writer: w,
+		Level:  logLvl,
+	})
+	logger.Info("loaded config", "config", cfg)
 
 	// db
-	conn, err := dsdb.Open(conf.DatabaseURL)
+	conn, err := dsdb.Open(dbURL)
 	if err != nil {
 		logger.Error("failed database open", "error", err)
 		os.Exit(1)
@@ -76,46 +102,26 @@ func main() {
 	fmt.Println(colorize(colorYellow, logo))
 	fmt.Printf("\nEnter \"/h\" for help\n\n")
 
-	userinput := textinput.New()
-	userinput.Focus()
-	userinput.CharLimit = 280
-	userinput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("221"))
-
-	m := model{
-		l:          logger,
-		timeFormat: conf.TimeFormat,
-		taskSvc:    taskSvc,
-		cmdTimeout: 3 * time.Second,
-		userinput:  userinput,
-		vp:         viewport.New(0, 0),
-		taskLog:    opts.tasks,
-	}
-
+	m := NewModel(taskSvc, opts.tasks, logger, modelOptions{
+		cmdTimeout:    3 * time.Second,
+		timeFormat:    timeFormat,
+		syncServerURL: syncServerURL,
+		syncRate:      sr,
+	})
 	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
 		logger.Error(err.Error())
 	}
 }
 
-func configLogger(level string, w io.Writer) daygo.Logger {
-	lvl, err := log.ParseLevel(level)
-	if err != nil {
-		panic(err)
-	}
-
-	return log.NewWithOptions(w, log.Options{
-		Level: lvl,
-	})
-}
-
-type options struct {
+type programOptions struct {
 	tasks      []Task
 	showHelp   bool
 	shouldExit bool
 }
 
-func parseProgramArgs(ctx context.Context, taskSvc TaskSvc) (options, error) {
-	var opts options
+func parseProgramArgs(ctx context.Context, taskSvc TaskSvc) (programOptions, error) {
+	var opts programOptions
 
 	if len(os.Args) == 1 {
 		return opts, nil
@@ -146,7 +152,7 @@ func parseProgramArgs(ctx context.Context, taskSvc TaskSvc) (options, error) {
 		t := TaskFromName(arg)
 		_, err := taskSvc.UpsertTask(ctx, t)
 		if err != nil {
-			return options{}, err
+			return programOptions{}, err
 		}
 		fmt.Printf(`Queued up "%s"`+"\n", arg)
 		opts.shouldExit = true
