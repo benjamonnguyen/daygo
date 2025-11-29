@@ -3,13 +3,15 @@ package daygo
 import (
 	"context"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type SyncSessionRepo interface {
-	GetSyncSession(ctx context.Context, id int) (ExistingSyncSessionRecord, error)
+	GetSyncSession(ctx context.Context, id string) (ExistingSyncSessionRecord, error)
 	GetLatestSession(ctx context.Context, serverURL string) (ExistingSyncSessionRecord, error)
 	InsertSyncSession(ctx context.Context, session SyncSessionRecord) (ExistingSyncSessionRecord, error)
-	UpdateSyncSession(ctx context.Context, id int, updated SyncSessionRecord) (ExistingSyncSessionRecord, error)
+	UpdateSyncSession(ctx context.Context, id string, updated SyncSessionRecord) (ExistingSyncSessionRecord, error)
 	DeleteSyncSessions(ctx context.Context, ids []any) ([]ExistingSyncSessionRecord, error)
 }
 
@@ -23,7 +25,7 @@ type SyncSessionRecord struct {
 // ExistingSyncSessionRecord represents a sync session that exists in the database
 type ExistingSyncSessionRecord struct {
 	SyncSessionRecord
-	ID        int
+	ID        uuid.UUID
 	CreatedAt time.Time
 }
 

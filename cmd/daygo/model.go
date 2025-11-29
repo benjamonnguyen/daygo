@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/google/uuid"
 )
 
 const logo = `
@@ -365,10 +366,10 @@ func (m *model) addNote(note string) {
 	parent.Notes = append(parent.Notes, Note(n))
 }
 
-func (m *model) deleteLastPendingTaskItem() int {
+func (m *model) deleteLastPendingTaskItem() uuid.UUID {
 	currentTask := m.currentTask()
 	if !currentTask.IsPending() {
-		return 0
+		return uuid.Nil
 	}
 
 	note := m.removeLastNote()
@@ -376,7 +377,7 @@ func (m *model) deleteLastPendingTaskItem() int {
 	if note.StartedAt.IsZero() {
 		return m.removeCurrentTask().ID
 	}
-	return 0
+	return uuid.Nil
 }
 
 func (m *model) removeCurrentTask() Task {
@@ -463,7 +464,7 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 			}
 		case "/x":
 			id := m.deleteLastPendingTaskItem()
-			if id == 0 {
+			if id == uuid.Nil {
 				m.addAlert("nothing left to delete", colorRed)
 				return m, nil
 			}
@@ -487,7 +488,7 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 				return m, nil
 			}
 			var cmd tea.Cmd
-			if t := m.editPendingItem(input); t != nil && t.ID != 0 {
+			if t := m.editPendingItem(input); t != nil && t.ID != uuid.Nil {
 				// update existing task
 				cmd = func() tea.Msg {
 					timeout, c := m.newTimeout()

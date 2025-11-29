@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/benjamonnguyen/daygo"
+	"github.com/google/uuid"
 )
 
 type TaskSvc interface {
 	UpsertTask(context.Context, Task) (daygo.ExistingTaskRecord, error)
-	DeleteTask(ctx context.Context, id int) ([]daygo.ExistingTaskRecord, error)
+	DeleteTask(ctx context.Context, id uuid.UUID) ([]daygo.ExistingTaskRecord, error)
 	GetAllTasks(ctx context.Context) ([]Task, error)
 }
 
@@ -26,7 +27,7 @@ func NewTaskSvc(taskRepo daygo.TaskRepo) TaskSvc {
 
 func (s *taskSvc) UpsertTask(ctx context.Context, t Task) (daygo.ExistingTaskRecord, error) {
 	// insert
-	if t.ID == 0 {
+	if t.ID == uuid.Nil {
 		inserted, err := s.repo.InsertTask(ctx, t.TaskRecord)
 		if err != nil {
 			return daygo.ExistingTaskRecord{}, err
@@ -71,8 +72,8 @@ func (s *taskSvc) GetAllTasks(ctx context.Context) ([]Task, error) {
 	return tasks, nil
 }
 
-func (s *taskSvc) DeleteTask(ctx context.Context, id int) ([]daygo.ExistingTaskRecord, error) {
-	res, err := s.repo.DeleteTasks(ctx, []any{id})
+func (s *taskSvc) DeleteTask(ctx context.Context, id uuid.UUID) ([]daygo.ExistingTaskRecord, error) {
+	res, err := s.repo.DeleteTasks(ctx, []any{id.String()})
 	if err != nil {
 		return nil, err
 	}

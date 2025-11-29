@@ -10,6 +10,7 @@ import (
 
 	"github.com/Thiht/transactor"
 	"github.com/benjamonnguyen/daygo"
+	"github.com/google/uuid"
 )
 
 type SyncController interface {
@@ -105,8 +106,8 @@ func (c *controller) syncClientTasks(ctx context.Context, tasks []daygo.Existing
 	return func(context.Context) error {
 		var existingTaskIDs []any
 		for _, clientTask := range tasks {
-			if clientTask.ID > 0 {
-				existingTaskIDs = append(existingTaskIDs, clientTask.ID)
+			if clientTask.ID != uuid.Nil {
+				existingTaskIDs = append(existingTaskIDs, clientTask.ID.String())
 			}
 		}
 
@@ -122,14 +123,14 @@ func (c *controller) syncClientTasks(ctx context.Context, tasks []daygo.Existing
 			existingTasks = existing
 		}
 
-		taskIDToExistingRecord := make(map[int]daygo.ExistingTaskRecord)
+		taskIDToExistingRecord := make(map[string]daygo.ExistingTaskRecord)
 		for _, task := range existingTasks {
-			taskIDToExistingRecord[task.ID] = task
+			taskIDToExistingRecord[task.ID.String()] = task
 		}
 
 		for _, clientTask := range tasks {
-			serverTask, exists := taskIDToExistingRecord[clientTask.ID]
-			if clientTask.ID == 0 || !exists {
+			serverTask, exists := taskIDToExistingRecord[clientTask.ID.String()]
+			if clientTask.ID == uuid.Nil || !exists {
 				// New task - create it
 				_, err := c.taskRepo.InsertTask(ctx, clientTask.TaskRecord)
 				if err != nil {
