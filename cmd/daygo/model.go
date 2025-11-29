@@ -377,7 +377,7 @@ func (m *model) deleteLastPendingTaskItem() uuid.UUID {
 	if note.StartedAt.IsZero() {
 		return m.removeCurrentTask().ID
 	}
-	return uuid.Nil
+return uuid.Nil
 }
 
 func (m *model) removeCurrentTask() Task {
