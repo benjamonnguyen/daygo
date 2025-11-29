@@ -49,13 +49,14 @@ var timeRe = regexp.MustCompile(`^(?:[01]\d|2[0-3])[0-5]\d$`)
 
 type model struct {
 	// children
-	vp        viewport.Model
+	vp        viewport.Model // TODO refactor into taskLogModel
 	userinput textinput.Model
 	tbTimer   timeBlockTimer
 
 	// supplied
 	l       daygo.Logger
 	taskSvc TaskSvc
+	opts    modelOptions
 
 	// state
 	taskQueue TaskQueue
@@ -63,10 +64,30 @@ type model struct {
 	alerts    []string
 	quitting  bool
 	h         int
+}
 
-	// configuration
-	cmdTimeout time.Duration
-	timeFormat string
+type modelOptions struct {
+	cmdTimeout    time.Duration
+	timeFormat    string
+	syncServerURL string
+	syncRate      time.Duration
+}
+
+func NewModel(taskSvc TaskSvc, initialTasks []Task, logger daygo.Logger, opts modelOptions) model {
+	userinput := textinput.New()
+	userinput.Focus()
+	userinput.CharLimit = 280
+	userinput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("221"))
+
+	return model{
+		taskSvc: taskSvc,
+		taskLog: initialTasks,
+		l:       logger,
+		opts:    opts,
+
+		vp:        viewport.New(0, 0),
+		userinput: userinput,
+	}
 }
 
 func (m model) Init() tea.Cmd {
@@ -287,7 +308,7 @@ func (m model) View() string {
 }
 
 func (m model) newTimeout() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), m.cmdTimeout)
+	return context.WithTimeout(context.Background(), m.opts.cmdTimeout)
 }
 
 func (m *model) addAlert(alert string, c color) {
@@ -331,7 +352,7 @@ func (m model) renderVisibleTasks() string {
 	var lines []string
 	availableHeight := m.vp.Height
 	for i := len(m.taskLog) - 1; i >= 0 && availableHeight >= 0; i-- {
-		line, h := m.taskLog[i].Render(m.timeFormat)
+		line, h := m.taskLog[i].Render(m.opts.timeFormat)
 		availableHeight -= h
 		if i != len(m.taskLog)-1 {
 			line = faintStyle.Render(line)
@@ -377,7 +398,7 @@ func (m *model) deleteLastPendingTaskItem() uuid.UUID {
 	if note.StartedAt.IsZero() {
 		return m.removeCurrentTask().ID
 	}
-return uuid.Nil
+	return uuid.Nil
 }
 
 func (m *model) removeCurrentTask() Task {

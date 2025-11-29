@@ -1,12 +1,11 @@
 package main
 
 import (
-	"fmt"
-	"log"
 	"os"
 	"path"
 
-	"github.com/joho/godotenv"
+	"github.com/benjamonnguyen/deadsimple/config"
+	"github.com/benjamonnguyen/deadsimple/config/env"
 )
 
 type Config struct {
@@ -17,8 +16,13 @@ type Config struct {
 }
 
 const (
-	DefaultLogLevel   = "WARN"
-	DefaultTimeFormat = "15:04"
+	KeyDatabaseURL   config.Key = "DAYGO_DB_URL"
+	KeyLogLevel      config.Key = "DAYGO_LOG_LEVEL"
+	KeyLogPath       config.Key = "DAYGO_LOG_PATH"
+	KeyTimeFormat    config.Key = "DAYGO_TIME_FORMAT"
+	KeyDevMode       config.Key = "DAYGO_DEV_MODE"
+	KeySyncServerURL config.Key = "DAYGO_SYNC_SERVER_URL"
+	KeySyncRate      config.Key = "DAYGO_SYNC_RATE"
 )
 
 var (
@@ -27,76 +31,39 @@ var (
 	DefaultLogPath     = path.Join(userHome, ".daygo", "daygo.log")
 )
 
-func LoadConfig() Config {
-	confFromEnv := Config{
-		DatabaseURL: os.Getenv("DAYGO_DB_URL"),
-		LogLevel:    os.Getenv("DAYGO_LOG_LEVEL"),
-		LogPath:     os.Getenv("DAYGO_LOG_PATH"),
-		TimeFormat:  os.Getenv("DAYGO_TIME_FORMAT"),
+func LoadConf(src string) (config.Config, error) {
+	entries := []env.Entry{
+		{
+			Key:      KeyDatabaseURL,
+			Default:  DefaultDatabaseURL,
+			Required: true,
+		},
+		{
+			Key:     KeyLogLevel,
+			Default: "WARN",
+		},
+		{
+			Key:      KeyLogPath,
+			Default:  DefaultLogPath,
+			Required: true,
+		},
+		{
+			Key:      KeyTimeFormat,
+			Default:  "15:04",
+			Required: true,
+		},
+		{
+			Key: KeyDevMode,
+		},
+		{
+			Key: KeySyncServerURL,
+		},
+		{
+			Key:      KeySyncRate,
+			Default:  "5m",
+			Required: true,
+		},
 	}
 
-	if os.Getenv("DAYGO_DEV_MODE") != "" {
-		fmt.Println("Dev mode is on!")
-		confFromEnv.LogLevel = "DEBUG"
-		confFromEnv.DatabaseURL = path.Join(os.TempDir(), "daygo-test.db")
-		confFromEnv.LogPath = path.Join(userHome, ".daygo", "dev.log")
-		f, err := os.OpenFile(confFromEnv.DatabaseURL, os.O_CREATE|os.O_TRUNC, 0o744)
-		if err != nil {
-			panic(err)
-		}
-		_ = f.Close()
-	}
-
-	// load file
-	cfgDir, _ := os.UserConfigDir()
-	cfgDir = path.Join(cfgDir, "daygo")
-	confFile := path.Join(cfgDir, "daygo.conf")
-	if _, err := os.Stat(confFile); err != nil {
-		log.Println("creating default conf file")
-		if err := os.MkdirAll(cfgDir, 0o744); err != nil {
-			panic(err)
-		}
-		f, err := os.Create(confFile)
-		if err != nil {
-			panic(err)
-		}
-		if _, err := f.WriteString("DAYGO_DB_URL=" + DefaultDatabaseURL); err != nil {
-			panic(err)
-		}
-		if _, err := f.WriteString("DAYGO_LOG_LEVEL=" + DefaultLogLevel); err != nil {
-			panic(err)
-		}
-		if _, err := f.WriteString("DAYGO_LOG_PATH=" + DefaultLogPath); err != nil {
-			panic(err)
-		}
-		if _, err := f.WriteString("DAYGO_TIME_FORMAT=" + DefaultTimeFormat); err != nil {
-			panic(err)
-		}
-		_ = f.Close()
-	}
-	if err := godotenv.Load(confFile); err != nil {
-		panic(err)
-	}
-	confFromFile := Config{
-		DatabaseURL: os.Getenv("DAYGO_DB_URL"),
-		LogLevel:    os.Getenv("DAYGO_LOG_LEVEL"),
-		LogPath:     os.Getenv("DAYGO_LOG_PATH"),
-		TimeFormat:  os.Getenv("DAYGO_TIME_FORMAT"),
-	}
-
-	return Config{
-		DatabaseURL: coalesce(confFromEnv.DatabaseURL, confFromFile.DatabaseURL, DefaultDatabaseURL),
-		LogLevel:    coalesce(confFromEnv.LogLevel, confFromFile.LogLevel, DefaultLogLevel),
-		LogPath:     coalesce(confFromEnv.LogPath, confFromFile.LogPath, DefaultLogPath),
-		TimeFormat:  coalesce(confFromEnv.TimeFormat, confFromFile.TimeFormat, DefaultTimeFormat),
-	}
-}
-
-func coalesce(args ...string) string {
-	for _, s := range args {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
+	return env.NewConfig(src, entries...)
 }
