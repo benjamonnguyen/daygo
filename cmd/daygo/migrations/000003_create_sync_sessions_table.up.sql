@@ -5,3 +5,5 @@ CREATE TABLE IF NOT EXISTS sync_sessions (
     error TEXT,
     created_at INTEGER NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_sync_sessions_created_at_status ON sync_sessions(created_at, status);
