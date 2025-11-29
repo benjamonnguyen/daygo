@@ -35,3 +35,12 @@ const (
 	SyncStatusSuccess            // synced client db
 	SyncStatusError
 )
+
+type SyncRequest struct {
+	LastSyncTime time.Time            `json:"last_sync_time"`
+	ClientTasks  []ExistingTaskRecord `json:"client_tasks"`
+}
+
+type SyncResponse struct {
+	ServerTasks []ExistingTaskRecord `json:"server_tasks"`
+}

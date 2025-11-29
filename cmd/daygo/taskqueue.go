@@ -15,6 +15,7 @@ type TaskQueue interface {
 	SetFilter(tag string)
 	FilterTag() string
 	AllTags() []string
+	AddTasks([]Task)
 }
 
 type taskQueue struct {
@@ -25,16 +26,18 @@ type taskQueue struct {
 	filteredTasks []Task
 }
 
+func sortTasks(a Task, b Task) int {
+	if a.QueuedAt.Before(b.QueuedAt) {
+		return 1
+	}
+	if a.QueuedAt.After(b.QueuedAt) {
+		return -1
+	}
+	return 0
+}
+
 func NewTaskQueue(tasks []Task) TaskQueue {
-	slices.SortFunc(tasks, func(a Task, b Task) int {
-		if a.QueuedAt.Before(b.QueuedAt) {
-			return 1
-		}
-		if a.QueuedAt.After(b.QueuedAt) {
-			return -1
-		}
-		return 0
-	})
+	slices.SortFunc(tasks, sortTasks)
 
 	tagToTaskCnt := make(map[string]int)
 	for _, task := range tasks {
@@ -62,6 +65,12 @@ func (tm *taskQueue) filter() {
 		}
 		tm.filteredTasks = filtered
 	}
+}
+
+func (tm *taskQueue) AddTasks(tasks []Task) {
+	tm.allTasks = append(tm.allTasks, tasks...)
+	slices.SortFunc(tm.allTasks, sortTasks)
+	tm.filter()
 }
 
 func (tm *taskQueue) SetFilter(tag string) {

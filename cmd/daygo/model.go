@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"regexp"
 	"slices"
 	"strings"
@@ -91,7 +94,11 @@ func NewModel(taskSvc TaskSvc, initialTasks []Task, logger daygo.Logger, opts mo
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(m.initTaskQueue, textinput.Blink)
+	return tea.Batch(
+		m.initTaskQueue,
+		textinput.Blink,
+		m.sync,
+	)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -140,6 +147,13 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case SyncMsg:
+		if msg.error != "" {
+			m.addAlert(msg.error, colorRed)
+		} else if len(msg.tasksToQueue) > 0 {
+			m.taskQueue.AddTasks(msg.tasksToQueue)
+		}
+		return m, m.sync
 	case tea.WindowSizeMsg:
 		m.h = msg.Height
 		m.userinput.Width = msg.Width
@@ -216,6 +230,64 @@ func (m model) endProgram(discardPendingTask bool) (model, tea.Cmd) {
 		m.resizeViewport()
 	}
 	return m, tea.Quit
+}
+
+func (m model) sync() tea.Msg {
+	if m.opts.syncServerURL == "" {
+		return nil
+	}
+
+	timeout, c := m.newTimeout()
+	defer c()
+
+	lastSync, err := m.taskSvc.GetLastSuccessfulSync(timeout, m.opts.syncServerURL)
+	if err != nil {
+		return ErrorMsg{
+			err: err,
+		}
+	}
+
+	tasksToSync, err := m.taskSvc.GetTasksToSync(timeout, m.opts.syncServerURL)
+	if err != nil {
+		return ErrorMsg{
+			err: err,
+		}
+	}
+
+	req := daygo.SyncRequest{
+		LastSyncTime: lastSync.CreatedAt,
+		ClientTasks:  tasksToSync,
+	}
+	reqData, err := json.Marshal(req)
+	if err != nil {
+		return ErrorMsg{err: fmt.Errorf("failed to marshal sync request: %w", err)}
+	}
+
+	resp, err := http.Post(m.opts.syncServerURL+"/sync", "application/json", bytes.NewReader(reqData))
+	if err != nil {
+		return ErrorMsg{err: fmt.Errorf("failed to make sync request: %w", err)}
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode != http.StatusOK {
+		return SyncMsg{
+			error: "sync request failed: " + resp.Status,
+		}
+	}
+
+	var syncResp daygo.SyncResponse
+	if err := json.NewDecoder(resp.Body).Decode(&syncResp); err != nil {
+		return ErrorMsg{err: fmt.Errorf("failed to decode sync response: %w", err)}
+	}
+	var serverTasks []Task
+	for _, task := range syncResp.ServerTasks {
+		serverTasks = append(serverTasks, TaskFromRecord(task))
+	}
+
+	time.Sleep(m.opts.syncRate)
+	return SyncMsg{
+		tasksToQueue: serverTasks,
+	}
 }
 
 func (m model) renderFooter() string {

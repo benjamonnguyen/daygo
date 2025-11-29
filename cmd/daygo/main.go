@@ -26,8 +26,8 @@ var logger daygo.Logger
 
 func main() {
 	// cfg
-	cfgDir, _ := os.UserConfigDir()
-	cfg, err := LoadConf(path.Join(cfgDir, "daygo", "daygo.conf"))
+	confDir, _ := os.UserConfigDir()
+	cfg, err := LoadConf(path.Join(confDir, "daygo", "daygo.conf"))
 	if err != nil {
 		panic(err)
 	}
@@ -56,7 +56,7 @@ func main() {
 		}
 		defer f.Close() //nolint:errcheck
 	}
-	logger = charmlog.NewLogger(charmlog.Options{
+	logger := charmlog.NewLogger(charmlog.Options{
 		Writer: w,
 		Level:  logLvl,
 	})
@@ -78,9 +78,10 @@ func main() {
 
 	// repos
 	taskRepo := sqlite.NewTaskRepo(dbGetter, logger)
+	syncSessionRepo := sqlite.NewSyncSessionRepo(dbGetter, logger)
 
 	// svcs
-	taskSvc := NewTaskSvc(taskRepo)
+	taskSvc := NewTaskSvc(taskRepo, syncSessionRepo)
 
 	// handle initial args
 	timeout, cancel := context.WithTimeout(context.Background(), 3*time.Second)

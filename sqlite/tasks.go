@@ -142,7 +142,7 @@ func (r *taskRepo) GetByParentID(ctx context.Context, parentID uuid.UUID) ([]day
 	return subtasks, nil
 }
 
-func (r *taskRepo) GetByCreatedTime(ctx context.Context, min, max time.Time) ([]daygo.ExistingTaskRecord, error) {
+func (r *taskRepo) GetByCreateTime(ctx context.Context, min, max time.Time) ([]daygo.ExistingTaskRecord, error) {
 	query := SelectAll
 	var args []any
 
@@ -159,6 +159,31 @@ func (r *taskRepo) GetByCreatedTime(ctx context.Context, min, max time.Time) ([]
 
 	db := r.dbGetter(ctx)
 	r.l.Debug("GetByCreatedTime", "query", query, "args", args)
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+
+	return extractTasks(rows)
+}
+
+func (r *taskRepo) GetByUpdateTime(ctx context.Context, min, max time.Time) ([]daygo.ExistingTaskRecord, error) {
+	query := SelectAll
+	var args []any
+
+	if !min.IsZero() && !max.IsZero() {
+		query += " WHERE updated_at BETWEEN ? AND ?"
+		args = append(args, min.Unix(), max.Unix())
+	} else if !min.IsZero() {
+		query += " WHERE updated_at >= ?"
+		args = append(args, min.Unix())
+	} else if !max.IsZero() {
+		query += " WHERE updated_at <= ?"
+		args = append(args, max.Unix())
+	}
+
+	db := r.dbGetter(ctx)
+	r.l.Debug("GetByUpdateTime", "query", query, "args", args)
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err

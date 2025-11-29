@@ -23,15 +23,6 @@ type controller struct {
 	logger     daygo.Logger
 }
 
-type SyncRequest struct {
-	LastSyncTime time.Time                  `json:"last_sync_time"`
-	ClientTasks  []daygo.ExistingTaskRecord `json:"client_tasks"`
-}
-
-type SyncResponse struct {
-	ServerTasks []daygo.ExistingTaskRecord `json:"server_tasks"`
-}
-
 type httpError struct {
 	code int
 	msg  string
@@ -48,7 +39,7 @@ func (c *controller) Sync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Unmarshal body to SyncRequest
-	var syncReq SyncRequest
+	var syncReq daygo.SyncRequest
 	if err := json.NewDecoder(r.Body).Decode(&syncReq); err != nil {
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
@@ -68,7 +59,7 @@ func (c *controller) Sync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Return server tasks to client
-	serverTasks, err := c.taskRepo.GetByCreatedTime(r.Context(), syncReq.LastSyncTime, time.Time{})
+	serverTasks, err := c.taskRepo.GetByCreateTime(r.Context(), syncReq.LastSyncTime, time.Time{})
 	if err != nil {
 		httpErr := httpError{
 			msg: "failed to get server tasks: " + err.Error(),
@@ -76,7 +67,7 @@ func (c *controller) Sync(w http.ResponseWriter, r *http.Request) {
 		c.logAndWriteError(w, httpErr)
 		return
 	}
-	response := SyncResponse{
+	response := daygo.SyncResponse{
 		ServerTasks: serverTasks,
 	}
 	c.logger.Info("Sync", "response", response)
