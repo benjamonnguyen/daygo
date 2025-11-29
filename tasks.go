@@ -3,21 +3,28 @@ package daygo
 import (
 	"context"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type TaskRepo interface {
-	GetTask(context.Context, int) (ExistingTaskRecord, error)
+	// getters
+	GetTask(context.Context, uuid.UUID) (ExistingTaskRecord, error)
 	GetTasks(context.Context, []any) ([]ExistingTaskRecord, error)
-	GetByParentID(context.Context, int) ([]ExistingTaskRecord, error)
+	GetAllTasks(ctx context.Context) ([]ExistingTaskRecord, error)
+	GetByParentID(context.Context, uuid.UUID) ([]ExistingTaskRecord, error)
 	GetByStartTime(ctx context.Context, min, max time.Time) ([]ExistingTaskRecord, error)
+	GetByCreatedTime(ctx context.Context, min, max time.Time) ([]ExistingTaskRecord, error)
+
+	//
 	InsertTask(context.Context, TaskRecord) (ExistingTaskRecord, error)
-	UpdateTask(context.Context, int, TaskRecord) (ExistingTaskRecord, error)
+	UpdateTask(context.Context, uuid.UUID, TaskRecord) (ExistingTaskRecord, error)
 	DeleteTasks(context.Context, []any) ([]ExistingTaskRecord, error)
 }
 
 type TaskRecord struct {
 	Name      string
-	ParentID  int
+	ParentID  uuid.UUID
 	StartedAt time.Time
 	EndedAt   time.Time
 	QueuedAt  time.Time
@@ -25,6 +32,7 @@ type TaskRecord struct {
 
 type ExistingTaskRecord struct {
 	TaskRecord
-	ID        int
+	ID        uuid.UUID
 	CreatedAt time.Time
+	UpdatedAt time.Time
 }

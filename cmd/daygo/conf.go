@@ -1,4 +1,4 @@
-package daygo
+package main
 
 import (
 	"fmt"

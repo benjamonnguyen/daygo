@@ -5,11 +5,11 @@ import (
 	"embed"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"strings"
 	"time"
 
+	txStdLib "github.com/Thiht/transactor/stdlib"
 	"github.com/benjamonnguyen/daygo"
 	"github.com/benjamonnguyen/daygo/sqlite"
 	dsdb "github.com/benjamonnguyen/deadsimple/database/sqlite"
@@ -17,40 +17,41 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/log"
 )
 
-var logger *slog.Logger
+var logger daygo.Logger
 
 //go:embed migrations/*.sql
 var migrations embed.FS
 
 func main() {
 	// conf
-	conf := daygo.LoadConfig()
+	conf := LoadConfig()
 	f, err := os.OpenFile(conf.LogPath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o666)
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 	logger = configLogger(conf.LogLevel, f)
 	logger.Info("loaded config", "config", conf)
 
 	// db
-	db, err := dsdb.Open(conf.DatabaseURL)
+	conn, err := dsdb.Open(conf.DatabaseURL)
 	if err != nil {
 		logger.Error("failed database open", "error", err)
 		os.Exit(1)
 	}
-	if err := db.RunMigrations(migrations); err != nil {
+	if err := conn.RunMigrations(migrations); err != nil {
 		logger.Error("failed migration", "error", err)
 		os.Exit(1)
 	}
-	defer func() {
-		_ = db.Close()
-	}()
+	defer conn.Close() //nolint:errcheck
+
+	_, dbGetter := txStdLib.NewTransactor(conn.DB(), txStdLib.NestedTransactionsSavepoints)
 
 	// repos
-	taskRepo := sqlite.NewTaskRepo(db.Conn(), logger)
+	taskRepo := sqlite.NewTaskRepo(dbGetter, logger)
 
 	// svcs
 	taskSvc := NewTaskSvc(taskRepo)
@@ -96,25 +97,15 @@ func main() {
 	}
 }
 
-func configLogger(level string, w io.Writer) *slog.Logger {
-	var lvl slog.Level
-	switch level {
-	case "DEBUG":
-		lvl = slog.LevelDebug
-	case "INFO":
-		lvl = slog.LevelInfo
-	case "WARN":
-		lvl = slog.LevelWarn
-	case "ERROR":
-		lvl = slog.LevelError
+func configLogger(level string, w io.Writer) daygo.Logger {
+	lvl, err := log.ParseLevel(level)
+	if err != nil {
+		panic(err)
 	}
 
-	handler := slog.NewTextHandler(w, &slog.HandlerOptions{
-		Level:     lvl,
-		AddSource: true,
+	return log.NewWithOptions(w, log.Options{
+		Level: lvl,
 	})
-
-	return slog.New(handler)
 }
 
 type options struct {
