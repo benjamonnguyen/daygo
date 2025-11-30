@@ -13,6 +13,7 @@ type TaskRepo interface {
 	GetTasks(context.Context, []any) ([]ExistingTaskRecord, error)
 	GetAllTasks(ctx context.Context) ([]ExistingTaskRecord, error)
 	GetByParentID(context.Context, uuid.UUID) ([]ExistingTaskRecord, error)
+	// GetByStartTime returns tasks with null started_at if min and max are zero
 	GetByStartTime(ctx context.Context, min, max time.Time) ([]ExistingTaskRecord, error)
 	GetByCreateTime(ctx context.Context, min, max time.Time) ([]ExistingTaskRecord, error)
 	GetByUpdateTime(ctx context.Context, min, max time.Time) ([]ExistingTaskRecord, error)

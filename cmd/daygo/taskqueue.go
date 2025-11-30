@@ -3,6 +3,8 @@ package main
 import (
 	"slices"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type TaskQueue interface {
@@ -15,7 +17,9 @@ type TaskQueue interface {
 	SetFilter(tag string)
 	FilterTag() string
 	AllTags() []string
-	AddTasks([]Task)
+
+	// sync
+	Sync([]Task)
 }
 
 type taskQueue struct {
@@ -67,8 +71,25 @@ func (tm *taskQueue) filter() {
 	}
 }
 
-func (tm *taskQueue) AddTasks(tasks []Task) {
-	tm.allTasks = append(tm.allTasks, tasks...)
+func (tm *taskQueue) Sync(tasks []Task) {
+	if len(tasks) == 0 {
+		return
+	}
+	taskIDToIdx := make(map[uuid.UUID]int)
+	for i, t := range tm.allTasks {
+		if t.ID != uuid.Nil {
+			taskIDToIdx[t.ID] = i
+		}
+	}
+	for _, t := range tasks {
+		if i, exists := taskIDToIdx[t.ID]; exists {
+			if t.UpdatedAt.After(tm.allTasks[i].UpdatedAt) {
+				tm.allTasks[i] = t
+			}
+		} else {
+			tm.allTasks = append(tm.allTasks, t)
+		}
+	}
 	slices.SortFunc(tm.allTasks, sortTasks)
 	tm.filter()
 }
