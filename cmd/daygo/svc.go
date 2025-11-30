@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/Thiht/transactor"
 	"github.com/benjamonnguyen/daygo"
 	"github.com/google/uuid"
 )
@@ -11,24 +12,63 @@ import (
 type TaskSvc interface {
 	UpsertTask(context.Context, Task) (daygo.ExistingTaskRecord, error)
 	DeleteTask(ctx context.Context, id uuid.UUID) ([]daygo.ExistingTaskRecord, error)
-	GetAllTasks(ctx context.Context) ([]Task, error)
+	GetPendingTasks(ctx context.Context) ([]Task, error)
 
 	// sync
 	GetTasksToSync(ctx context.Context, serverURL string) ([]daygo.ExistingTaskRecord, error)
 	GetLastSuccessfulSync(ctx context.Context, serverURL string) (daygo.ExistingSyncSessionRecord, error)
+	UpsertSyncSession(context.Context, int, daygo.SyncSessionRecord) (daygo.ExistingSyncSessionRecord, error)
+	SyncTasks(ctx context.Context, serverTasks []daygo.ExistingTaskRecord) ([]Task, []error)
 }
 
 // impl
 type taskSvc struct {
+	transactor      transactor.Transactor
 	taskRepo        daygo.TaskRepo
 	syncSessionRepo daygo.SyncSessionRepo
 }
 
-func NewTaskSvc(taskRepo daygo.TaskRepo, syncSessionRepo daygo.SyncSessionRepo) TaskSvc {
+func NewTaskSvc(transactor transactor.Transactor, taskRepo daygo.TaskRepo, syncSessionRepo daygo.SyncSessionRepo) TaskSvc {
 	return &taskSvc{
+		transactor:      transactor,
 		taskRepo:        taskRepo,
 		syncSessionRepo: syncSessionRepo,
 	}
+}
+
+func (s *taskSvc) SyncTasks(ctx context.Context, serverTasks []daygo.ExistingTaskRecord) ([]Task, []error) {
+	// Collect serverTaskIDs
+	serverTaskIDs := make([]any, 0, len(serverTasks))
+	for _, serverTask := range serverTasks {
+		serverTaskIDs = append(serverTaskIDs, serverTask.ID.String())
+	}
+
+	// Get existing client tasks
+	clientTasks, err := s.taskRepo.GetTasks(ctx, serverTaskIDs)
+	if err != nil {
+		return nil, []error{err}
+	}
+
+	// Create a map for quick lookup of client tasks by ID
+	clientTaskMap := make(map[uuid.UUID]daygo.ExistingTaskRecord)
+	for _, clientTask := range clientTasks {
+		clientTaskMap[clientTask.ID] = clientTask
+	}
+
+	var upserted []Task
+	var errs []error
+	for _, serverTask := range serverTasks {
+		clientTask, exists := clientTaskMap[serverTask.ID]
+		if !exists || serverTask.UpdatedAt.After(clientTask.UpdatedAt) {
+			u, err := s.UpsertTask(ctx, TaskFromRecord(serverTask))
+			if err != nil {
+				errs = append(errs, err)
+			} else {
+				upserted = append(upserted, TaskFromRecord(u))
+			}
+		}
+	}
+	return upserted, errs
 }
 
 func (s *taskSvc) UpsertTask(ctx context.Context, t Task) (daygo.ExistingTaskRecord, error) {
@@ -64,7 +104,8 @@ func (s *taskSvc) createNotes(ctx context.Context, notes []Note) error {
 	return nil
 }
 
-func (s *taskSvc) GetAllTasks(ctx context.Context) ([]Task, error) {
+func (s *taskSvc) GetPendingTasks(ctx context.Context) ([]Task, error) {
+	// get tasks not started yet and is queued up
 	records, err := s.taskRepo.GetByStartTime(ctx, time.Time{}, time.Time{})
 	if err != nil {
 		return nil, err
@@ -72,7 +113,9 @@ func (s *taskSvc) GetAllTasks(ctx context.Context) ([]Task, error) {
 
 	tasks := make([]Task, 0, len(records))
 	for _, r := range records {
-		tasks = append(tasks, TaskFromRecord(r))
+		if !r.UpdatedAt.IsZero() {
+			tasks = append(tasks, TaskFromRecord(r))
+		}
 	}
 
 	return tasks, nil
@@ -106,4 +149,21 @@ func (s *taskSvc) GetTasksToSync(ctx context.Context, serverURL string) ([]daygo
 
 func (s *taskSvc) GetLastSuccessfulSync(ctx context.Context, serverURL string) (daygo.ExistingSyncSessionRecord, error) {
 	return s.syncSessionRepo.GetLastSession(ctx, serverURL, daygo.SyncStatusSuccess)
+}
+
+func (s *taskSvc) UpsertSyncSession(ctx context.Context, id int, session daygo.SyncSessionRecord) (daygo.ExistingSyncSessionRecord, error) {
+	// insert
+	if id == 0 {
+		inserted, err := s.syncSessionRepo.InsertSession(ctx, session)
+		if err != nil {
+			return daygo.ExistingSyncSessionRecord{}, err
+		}
+		return inserted, nil
+	}
+	// update
+	updated, err := s.syncSessionRepo.UpdateSession(ctx, id, session)
+	if err != nil {
+		return daygo.ExistingSyncSessionRecord{}, err
+	}
+	return updated, nil
 }

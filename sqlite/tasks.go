@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	SelectAll = "SELECT id, name, started_at, ended_at, parent_id, created_at, updated_at FROM tasks"
+	SelectAll = "SELECT id, name, started_at, ended_at, parent_id, created_at, updated_at, queued_at FROM tasks"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -28,6 +28,7 @@ type taskEntity struct {
 	CreatedAt int64
 	UpdatedAt int64
 	ParentID  sql.NullString
+	QueuedAt  sql.NullInt64
 }
 
 // taskRepo
@@ -206,7 +207,7 @@ func extractTasks(rows *sql.Rows) ([]daygo.ExistingTaskRecord, error) {
 
 func extractTask(s scannable) (daygo.ExistingTaskRecord, error) {
 	var e taskEntity
-	if err := s.Scan(&e.ID, &e.Name, &e.StartedAt, &e.EndedAt, &e.ParentID, &e.CreatedAt, &e.UpdatedAt); err != nil {
+	if err := s.Scan(&e.ID, &e.Name, &e.StartedAt, &e.EndedAt, &e.ParentID, &e.CreatedAt, &e.UpdatedAt, &e.QueuedAt); err != nil {
 		return daygo.ExistingTaskRecord{}, err
 	}
 
@@ -232,9 +233,9 @@ func (r *taskRepo) InsertTask(ctx context.Context, task daygo.TaskRecord) (daygo
 	}
 	e := mapToTaskEntity(existingRecord)
 
-	query := `INSERT INTO tasks (id, name, parent_id, started_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO tasks (id, name, parent_id, started_at, created_at, updated_at, queued_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
 	r.l.Debug("creating task", "query", query, "entity", e)
-	_, err := db.ExecContext(ctx, query, e.ID, e.Name, e.ParentID, e.StartedAt, e.CreatedAt, e.UpdatedAt)
+	_, err := db.ExecContext(ctx, query, e.ID, e.Name, e.ParentID, e.StartedAt, e.CreatedAt, e.UpdatedAt, e.QueuedAt)
 	if err != nil {
 		return daygo.ExistingTaskRecord{}, err
 	}
@@ -258,9 +259,9 @@ func (r *taskRepo) UpdateTask(ctx context.Context, id uuid.UUID, updated daygo.T
 	_, err = db.ExecContext(
 		ctx,
 		`UPDATE tasks
-		SET ended_at = ?, name = ?, started_at = ?, updated_at = ?
+		SET ended_at = ?, name = ?, started_at = ?, updated_at = ?, queued_at = ?
 		WHERE id = ?`,
-		e.EndedAt, e.Name, e.StartedAt, e.UpdatedAt, e.ID,
+		e.EndedAt, e.Name, e.StartedAt, e.UpdatedAt, e.QueuedAt, e.ID,
 	)
 	if err != nil {
 		return daygo.ExistingTaskRecord{}, err
@@ -323,16 +324,25 @@ func mapToTaskEntity(task daygo.ExistingTaskRecord) taskEntity {
 			Int64: task.EndedAt.Unix(),
 		}
 	}
+	if !task.QueuedAt.IsZero() {
+		e.QueuedAt = sql.NullInt64{
+			Valid: true,
+			Int64: task.QueuedAt.Unix(),
+		}
+	}
 	return e
 }
 
 func mapToExistingTaskRecord(e taskEntity) daygo.ExistingTaskRecord {
-	var startedAt, endedAt time.Time
+	var startedAt, endedAt, queuedAt time.Time
 	if e.StartedAt.Valid {
 		startedAt = time.Unix(e.StartedAt.Int64, 0).Local()
 	}
 	if e.EndedAt.Valid {
 		endedAt = time.Unix(e.EndedAt.Int64, 0).Local()
+	}
+	if e.QueuedAt.Valid {
+		queuedAt = time.Unix(e.QueuedAt.Int64, 0).Local()
 	}
 
 	// Parse UUID for ID
@@ -353,6 +363,7 @@ func mapToExistingTaskRecord(e taskEntity) daygo.ExistingTaskRecord {
 			ParentID:  parentID,
 			StartedAt: startedAt,
 			EndedAt:   endedAt,
+			QueuedAt:  queuedAt,
 		},
 	}
 }

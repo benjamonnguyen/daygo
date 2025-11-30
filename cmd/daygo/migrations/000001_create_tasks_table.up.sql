@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     ended_at INTEGER,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
+    queued_at INTEGER,
     FOREIGN KEY (parent_id) REFERENCES tasks(id)
 );
 

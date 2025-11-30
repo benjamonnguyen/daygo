@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -150,9 +151,8 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 	case SyncMsg:
 		if msg.error != "" {
 			m.addAlert(msg.error, colorRed)
-		} else if len(msg.tasksToQueue) > 0 {
-			m.taskQueue.AddTasks(msg.tasksToQueue)
 		}
+		m.taskQueue.Sync(msg.tasksToQueue)
 		return m, m.sync
 	case tea.WindowSizeMsg:
 		m.h = msg.Height
@@ -200,7 +200,7 @@ func (m model) initTaskQueue() tea.Msg {
 	timeout, cancel := m.newTimeout()
 	defer cancel()
 
-	tasks, err := m.taskSvc.GetAllTasks(timeout)
+	tasks, err := m.taskSvc.GetPendingTasks(timeout)
 	if err != nil {
 		return ErrorMsg{
 			err: err,
@@ -237,7 +237,8 @@ func (m model) sync() tea.Msg {
 		return nil
 	}
 
-	timeout, c := m.newTimeout()
+	// hardcoded timeout
+	timeout, c := context.WithTimeout(context.Background(), 10*time.Second)
 	defer c()
 
 	lastSync, err := m.taskSvc.GetLastSuccessfulSync(timeout, m.opts.syncServerURL)
@@ -269,9 +270,19 @@ func (m model) sync() tea.Msg {
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
+	session := daygo.SyncSessionRecord{
+		ServerURL: m.opts.syncServerURL,
+	}
 	if resp.StatusCode != http.StatusOK {
+		session.Status = daygo.SyncStatusError
+		session.Error = "sync request failed: " + resp.Status
+		if _, err := m.taskSvc.UpsertSyncSession(timeout, 0, session); err != nil {
+			return ErrorMsg{
+				err: err,
+			}
+		}
 		return SyncMsg{
-			error: "sync request failed: " + resp.Status,
+			error: session.Error,
 		}
 	}
 
@@ -279,14 +290,30 @@ func (m model) sync() tea.Msg {
 	if err := json.NewDecoder(resp.Body).Decode(&syncResp); err != nil {
 		return ErrorMsg{err: fmt.Errorf("failed to decode sync response: %w", err)}
 	}
-	var serverTasks []Task
-	for _, task := range syncResp.ServerTasks {
-		serverTasks = append(serverTasks, TaskFromRecord(task))
+
+	session.Status = daygo.SyncStatusPartial
+	created, err := m.taskSvc.UpsertSyncSession(timeout, 0, session)
+	if err != nil {
+		return ErrorMsg{
+			err: err,
+		}
 	}
 
+	upserted, errs := m.taskSvc.SyncTasks(timeout, syncResp.ServerTasks)
+	if len(errs) > 0 {
+		// has error but still partial sync status
+		session.Error = errors.Join(errs...).Error()
+	} else {
+		session.Status = daygo.SyncStatusSuccess
+	}
+	if _, err := m.taskSvc.UpsertSyncSession(timeout, created.ID, session); err != nil {
+		return ErrorMsg{
+			err: err,
+		}
+	}
 	time.Sleep(m.opts.syncRate)
 	return SyncMsg{
-		tasksToQueue: serverTasks,
+		tasksToQueue: upserted,
 	}
 }
 
@@ -556,22 +583,31 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 				return nil
 			}
 		case "/x":
-			id := m.deleteLastPendingTaskItem()
-			if id == uuid.Nil {
+			if !m.currentTask().IsPending() {
 				m.addAlert("nothing left to delete", colorRed)
 				return m, nil
 			}
-			return m, func() tea.Msg {
-				timeout, c := m.newTimeout()
-				defer c()
-
-				if _, err := m.taskSvc.DeleteTask(timeout, id); err != nil {
-					return ErrorMsg{
-						err: err,
-					}
-				}
-				return nil
+			id := m.deleteLastPendingTaskItem()
+			if !m.currentTask().IsPending() && m.taskQueue.Size() > 0 {
+				started := m.taskQueue.Dequeue()
+				started.StartedAt = time.Now()
+				m.taskLog = append(m.taskLog, started)
 			}
+			var cmd tea.Cmd
+			if id != uuid.Nil {
+				cmd = func() tea.Msg {
+					timeout, c := m.newTimeout()
+					defer c()
+
+					if _, err := m.taskSvc.DeleteTask(timeout, id); err != nil {
+						return ErrorMsg{
+							err: err,
+						}
+					}
+					return nil
+				}
+			}
+			return m, cmd
 		case "/h":
 			m.addAlert(commandHelp, colorYellow)
 			return m, nil
@@ -601,6 +637,7 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 				return m, nil
 			}
 			t := m.taskQueue.Queue(TaskFromName(parts[1]))
+			m.addAlert(fmt.Sprintf("Queued \"%s\"", t.Name), colorCyan)
 			return m, func() tea.Msg {
 				timeout, c := m.newTimeout()
 				defer c()

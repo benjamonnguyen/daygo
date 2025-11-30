@@ -74,14 +74,14 @@ func main() {
 	}
 	defer conn.Close() //nolint:errcheck
 
-	_, dbGetter := txStdLib.NewTransactor(conn.DB(), txStdLib.NestedTransactionsSavepoints)
+	transactor, dbGetter := txStdLib.NewTransactor(conn.DB(), txStdLib.NestedTransactionsSavepoints)
 
 	// repos
 	taskRepo := sqlite.NewTaskRepo(dbGetter, logger)
 	syncSessionRepo := sqlite.NewSyncSessionRepo(dbGetter, logger)
 
 	// svcs
-	taskSvc := NewTaskSvc(taskRepo, syncSessionRepo)
+	taskSvc := NewTaskSvc(transactor, taskRepo, syncSessionRepo)
 
 	// handle initial args
 	timeout, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -151,6 +151,7 @@ func parseProgramArgs(ctx context.Context, taskSvc TaskSvc) (programOptions, err
 		return opts, nil
 	case "/a":
 		t := TaskFromName(arg)
+		t.UpdatedAt = time.Now()
 		_, err := taskSvc.UpsertTask(ctx, t)
 		if err != nil {
 			return programOptions{}, err
