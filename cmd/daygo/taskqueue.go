@@ -40,7 +40,7 @@ func sortTasks(a Task, b Task) int {
 	return 0
 }
 
-func NewTaskQueue(tasks []Task) TaskQueue {
+func (tm *taskQueue) setTasks(tasks []Task) {
 	slices.SortFunc(tasks, sortTasks)
 
 	tagToTaskCnt := make(map[string]int)
@@ -50,11 +50,15 @@ func NewTaskQueue(tasks []Task) TaskQueue {
 		}
 	}
 
-	return &taskQueue{
-		allTasks:      tasks,
-		filteredTasks: tasks,
-		tagToTaskCnt:  tagToTaskCnt,
-	}
+	tm.allTasks = tasks
+	tm.tagToTaskCnt = tagToTaskCnt
+	tm.filter()
+}
+
+func NewTaskQueue(tasks []Task) TaskQueue {
+	tq := taskQueue{}
+	tq.setTasks(tasks)
+	return &tq
 }
 
 func (tm *taskQueue) filter() {
@@ -90,8 +94,7 @@ func (tm *taskQueue) Sync(tasks []Task) {
 			tm.allTasks = append(tm.allTasks, t)
 		}
 	}
-	slices.SortFunc(tm.allTasks, sortTasks)
-	tm.filter()
+	tm.setTasks(tm.allTasks)
 }
 
 func (tm *taskQueue) SetFilter(tag string) {
@@ -124,7 +127,11 @@ func (tm *taskQueue) Size() int {
 }
 
 func (tm *taskQueue) Queue(t Task) Task {
+	if t.ID == uuid.Nil {
+		t.ID = uuid.New()
+	}
 	t.QueuedAt = time.Now()
+	t.StartedAt = time.Time{}
 	tm.allTasks = append([]Task{t}, tm.allTasks...)
 	for _, tag := range t.Tags {
 		tm.tagToTaskCnt[tag] += 1

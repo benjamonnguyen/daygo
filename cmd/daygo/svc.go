@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/Thiht/transactor"
 	"github.com/benjamonnguyen/daygo"
+	"github.com/benjamonnguyen/daygo/sqlite"
 	"github.com/google/uuid"
 )
 
@@ -23,13 +25,15 @@ type TaskSvc interface {
 
 // impl
 type taskSvc struct {
+	logger          daygo.Logger
 	transactor      transactor.Transactor
 	taskRepo        daygo.TaskRepo
 	syncSessionRepo daygo.SyncSessionRepo
 }
 
-func NewTaskSvc(transactor transactor.Transactor, taskRepo daygo.TaskRepo, syncSessionRepo daygo.SyncSessionRepo) TaskSvc {
+func NewTaskSvc(transactor transactor.Transactor, logger daygo.Logger, taskRepo daygo.TaskRepo, syncSessionRepo daygo.SyncSessionRepo) TaskSvc {
 	return &taskSvc{
+		logger:          logger,
 		transactor:      transactor,
 		taskRepo:        taskRepo,
 		syncSessionRepo: syncSessionRepo,
@@ -72,30 +76,37 @@ func (s *taskSvc) SyncTasks(ctx context.Context, serverTasks []daygo.ExistingTas
 }
 
 func (s *taskSvc) UpsertTask(ctx context.Context, t Task) (daygo.ExistingTaskRecord, error) {
+	var res daygo.ExistingTaskRecord
+	// update
+	if t.ID != uuid.Nil {
+		updated, err := s.taskRepo.UpdateTask(ctx, t.ID, t.TaskRecord)
+		if err != nil {
+			if !errors.Is(err, sqlite.ErrNotFound) {
+				return daygo.ExistingTaskRecord{}, err
+			}
+		}
+		res = updated
+	}
 	// insert
-	if t.ID == uuid.Nil {
+	if res.ID == uuid.Nil {
 		inserted, err := s.taskRepo.InsertTask(ctx, t.TaskRecord)
 		if err != nil {
 			return daygo.ExistingTaskRecord{}, err
 		}
-		if err := s.createNotes(ctx, t.Notes); err != nil {
-			return daygo.ExistingTaskRecord{}, err
-		}
-		return inserted, nil
+		res = inserted
 	}
-	// update
-	updated, err := s.taskRepo.UpdateTask(ctx, t.ID, t.TaskRecord)
-	if err != nil {
+
+	// notes
+	if err := s.createNotes(ctx, res.ID, t.Notes); err != nil {
 		return daygo.ExistingTaskRecord{}, err
 	}
-	if err := s.createNotes(ctx, t.Notes); err != nil {
-		return daygo.ExistingTaskRecord{}, err
-	}
-	return updated, nil
+
+	return res, nil
 }
 
-func (s *taskSvc) createNotes(ctx context.Context, notes []Note) error {
+func (s *taskSvc) createNotes(ctx context.Context, parentID uuid.UUID, notes []Note) error {
 	for _, n := range notes {
+		n.ParentID = parentID
 		_, err := s.taskRepo.InsertTask(ctx, daygo.TaskRecord(n))
 		if err != nil {
 			return err
@@ -122,7 +133,7 @@ func (s *taskSvc) GetPendingTasks(ctx context.Context) ([]Task, error) {
 }
 
 func (s *taskSvc) DeleteTask(ctx context.Context, id uuid.UUID) ([]daygo.ExistingTaskRecord, error) {
-	res, err := s.taskRepo.DeleteTasks(ctx, []any{id.String()})
+	res, err := s.taskRepo.DeleteTasks(ctx, []any{id})
 	if err != nil {
 		return nil, err
 	}

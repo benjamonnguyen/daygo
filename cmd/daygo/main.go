@@ -81,7 +81,7 @@ func main() {
 	syncSessionRepo := sqlite.NewSyncSessionRepo(dbGetter, logger)
 
 	// svcs
-	taskSvc := NewTaskSvc(transactor, taskRepo, syncSessionRepo)
+	taskSvc := NewTaskSvc(transactor, logger, taskRepo, syncSessionRepo)
 
 	// handle initial args
 	timeout, cancel := context.WithTimeout(context.Background(), 3*time.Second)

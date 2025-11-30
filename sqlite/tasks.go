@@ -57,14 +57,7 @@ func (r *taskRepo) GetTask(ctx context.Context, id uuid.UUID) (daygo.ExistingTas
 		fmt.Sprintf("%s WHERE id=?", SelectAll), id.String(),
 	)
 
-	task, err := extractTask(row)
-	if err != nil {
-		return task, err
-	}
-	if task.ID == uuid.Nil {
-		return task, ErrNotFound
-	}
-	return task, nil
+	return extractTask(row)
 }
 
 func (r taskRepo) GetAllTasks(ctx context.Context) ([]daygo.ExistingTaskRecord, error) {
@@ -208,6 +201,9 @@ func extractTasks(rows *sql.Rows) ([]daygo.ExistingTaskRecord, error) {
 func extractTask(s scannable) (daygo.ExistingTaskRecord, error) {
 	var e taskEntity
 	if err := s.Scan(&e.ID, &e.Name, &e.StartedAt, &e.EndedAt, &e.ParentID, &e.CreatedAt, &e.UpdatedAt, &e.QueuedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return daygo.ExistingTaskRecord{}, ErrNotFound
+		}
 		return daygo.ExistingTaskRecord{}, err
 	}
 

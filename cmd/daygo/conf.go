@@ -13,7 +13,6 @@ const (
 	KeyLogLevel      config.Key = "DAYGO_LOG_LEVEL"
 	KeyLogPath       config.Key = "DAYGO_LOG_PATH"
 	KeyTimeFormat    config.Key = "DAYGO_TIME_FORMAT"
-	KeyDevMode       config.Key = "DAYGO_DEV_MODE"
 	KeySyncServerURL config.Key = "DAYGO_SYNC_SERVER_URL"
 	KeySyncRate      config.Key = "DAYGO_SYNC_RATE"
 )
@@ -44,9 +43,6 @@ func LoadConf(src string) (config.Config, error) {
 			Key:      KeyTimeFormat,
 			Default:  "15:04",
 			Required: true,
-		},
-		{
-			Key: KeyDevMode,
 		},
 		{
 			Key: KeySyncServerURL,
