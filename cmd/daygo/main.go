@@ -56,7 +56,7 @@ func main() {
 		}
 		defer f.Close() //nolint:errcheck
 	}
-	logger := charmlog.NewLogger(charmlog.Options{
+	logger = charmlog.NewLogger(charmlog.Options{
 		Writer: w,
 		Level:  logLvl,
 	})

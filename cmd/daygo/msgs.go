@@ -16,3 +16,7 @@ type SyncMsg struct {
 	tasksToQueue []Task
 	error        string
 }
+
+type QueueMsg struct {
+	task Task
+}
