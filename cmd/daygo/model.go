@@ -486,24 +486,25 @@ func (m *model) addNote(note string) {
 	parent.Notes = append(parent.Notes, Note(n))
 }
 
-func (m *model) deleteLastPendingTaskItem() uuid.UUID {
+func (m *model) deleteLastPendingTaskItem() daygo.ExistingTaskRecord {
 	currentTask := m.currentTask()
 	if !currentTask.IsPending() {
-		return uuid.Nil
+		return daygo.ExistingTaskRecord{}
 	}
 
 	note := m.removeLastNote()
 	// using StartedAt to determine if IsZero - addNote() sets it
 	if note.StartedAt.IsZero() {
-		return m.removeCurrentTask().ID
+		return m.removeCurrentTask().ExistingTaskRecord
 	}
-	return uuid.Nil
+	return daygo.ExistingTaskRecord{}
 }
 
 func (m *model) removeCurrentTask() Task {
 	if t := m.currentTask(); t != nil {
+		tmp := *t
 		m.taskLog = m.taskLog[:len(m.taskLog)-1]
-		return *t
+		return tmp
 	}
 	return Task{}
 }
@@ -555,7 +556,6 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 		parts := strings.SplitN(input, " ", 2)
 		switch parts[0] {
 		case "/n":
-
 			var started Task
 			if len(parts) < 2 {
 				if m.taskQueue.Size() == 0 {
@@ -568,38 +568,41 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 				started = TaskFromName(parts[1])
 			}
 
-			ended, _ := m.endPendingTask()
+			var persistEnded tea.Cmd
+			ended, err := m.endPendingTask()
+			if err == nil {
+				persistEnded = func() tea.Msg {
+					timeout, cancel := m.newTimeout()
+					defer cancel()
+					if _, err := m.taskSvc.UpsertTask(timeout, ended); err != nil {
+						return ErrorMsg{
+							err: err,
+						}
+					}
+					return nil
+				}
+			}
 			started.StartedAt = time.Now()
 			m.taskLog = append(m.taskLog, started)
-
-			return m, func() tea.Msg {
-				timeout, cancel := m.newTimeout()
-				defer cancel()
-				if _, err := m.taskSvc.UpsertTask(timeout, ended); err != nil {
-					return ErrorMsg{
-						err: err,
-					}
-				}
-				return nil
-			}
+			return m, persistEnded
 		case "/x":
 			if !m.currentTask().IsPending() {
 				m.addAlert("nothing left to delete", colorRed)
 				return m, nil
 			}
-			id := m.deleteLastPendingTaskItem()
+			deleted := m.deleteLastPendingTaskItem()
 			if !m.currentTask().IsPending() && m.taskQueue.Size() > 0 {
 				started := m.taskQueue.Dequeue()
 				started.StartedAt = time.Now()
 				m.taskLog = append(m.taskLog, started)
 			}
 			var cmd tea.Cmd
-			if id != uuid.Nil {
+			if !deleted.CreatedAt.IsZero() {
 				cmd = func() tea.Msg {
 					timeout, c := m.newTimeout()
 					defer c()
 
-					if _, err := m.taskSvc.DeleteTask(timeout, id); err != nil {
+					if _, err := m.taskSvc.DeleteTask(timeout, deleted.ID); err != nil {
 						return ErrorMsg{
 							err: err,
 						}
@@ -653,12 +656,16 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 				m.addAlert("no pending task to skip", colorRed)
 				return m, nil
 			}
-			curr := m.removeCurrentTask()
+			if m.taskQueue.Size() == 0 {
+				m.addAlert("task queue is empty", colorRed)
+				return m, nil
 
-			if m.taskQueue.Size() > 0 {
-				t := m.taskQueue.Dequeue()
-				m.taskLog = append(m.taskLog, t)
 			}
+
+			curr := m.removeCurrentTask()
+			t := m.taskQueue.Dequeue()
+			t.StartedAt = time.Now()
+			m.taskLog = append(m.taskLog, t)
 			queued := m.taskQueue.Queue(curr)
 
 			return m, func() tea.Msg {
