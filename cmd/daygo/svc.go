@@ -12,8 +12,9 @@ import (
 )
 
 type TaskSvc interface {
-	UpsertTask(context.Context, Task) (daygo.ExistingTaskRecord, error)
+	UpsertTask(context.Context, Task) (Task, error)
 	DeleteTask(ctx context.Context, id uuid.UUID) ([]daygo.ExistingTaskRecord, error)
+	QueueTask(context.Context, Task) (Task, error)
 	GetPendingTasks(ctx context.Context) ([]Task, error)
 
 	// sync
@@ -38,6 +39,12 @@ func NewTaskSvc(transactor transactor.Transactor, logger daygo.Logger, taskRepo 
 		taskRepo:        taskRepo,
 		syncSessionRepo: syncSessionRepo,
 	}
+}
+
+func (s *taskSvc) QueueTask(ctx context.Context, t Task) (Task, error) {
+	t.QueuedAt = time.Now()
+	t.StartedAt = time.Time{}
+	return s.UpsertTask(ctx, t)
 }
 
 func (s *taskSvc) SyncTasks(ctx context.Context, serverTasks []daygo.ExistingTaskRecord) ([]Task, []error) {
@@ -68,21 +75,21 @@ func (s *taskSvc) SyncTasks(ctx context.Context, serverTasks []daygo.ExistingTas
 			if err != nil {
 				errs = append(errs, err)
 			} else {
-				upserted = append(upserted, TaskFromRecord(u))
+				upserted = append(upserted, u)
 			}
 		}
 	}
 	return upserted, errs
 }
 
-func (s *taskSvc) UpsertTask(ctx context.Context, t Task) (daygo.ExistingTaskRecord, error) {
+func (s *taskSvc) UpsertTask(ctx context.Context, t Task) (Task, error) {
 	var res daygo.ExistingTaskRecord
 	// update
 	if t.ID != uuid.Nil {
 		updated, err := s.taskRepo.UpdateTask(ctx, t.ID, t.TaskRecord)
 		if err != nil {
 			if !errors.Is(err, sqlite.ErrNotFound) {
-				return daygo.ExistingTaskRecord{}, err
+				return Task{}, err
 			}
 		}
 		res = updated
@@ -91,17 +98,17 @@ func (s *taskSvc) UpsertTask(ctx context.Context, t Task) (daygo.ExistingTaskRec
 	if res.ID == uuid.Nil {
 		inserted, err := s.taskRepo.InsertTask(ctx, t.TaskRecord)
 		if err != nil {
-			return daygo.ExistingTaskRecord{}, err
+			return Task{}, err
 		}
 		res = inserted
 	}
 
 	// notes
 	if err := s.createNotes(ctx, res.ID, t.Notes); err != nil {
-		return daygo.ExistingTaskRecord{}, err
+		return Task{}, err
 	}
 
-	return res, nil
+	return TaskFromRecord(res), nil
 }
 
 func (s *taskSvc) createNotes(ctx context.Context, parentID uuid.UUID, notes []Note) error {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"slices"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -12,7 +11,7 @@ type TaskQueue interface {
 	Dequeue() Task
 	// Peek returns nil if queue is empty
 	Peek() *Task
-	Queue(t Task) Task
+	Queue(t Task)
 	Size() int
 	SetFilter(tag string)
 	FilterTag() string
@@ -26,8 +25,8 @@ type taskQueue struct {
 	filterTag    string
 	tagToTaskCnt map[string]int
 
-	allTasks      []Task
-	filteredTasks []Task
+	allTasks            []Task
+	filteredTaskIndices []int
 }
 
 func sortTasks(a Task, b Task) int {
@@ -62,17 +61,13 @@ func NewTaskQueue(tasks []Task) TaskQueue {
 }
 
 func (tm *taskQueue) filter() {
-	if tm.filterTag == "" {
-		tm.filteredTasks = tm.allTasks
-	} else {
-		var filtered []Task
-		for _, task := range tm.allTasks {
-			if slices.Contains(task.Tags, tm.filterTag) {
-				filtered = append(filtered, task)
-			}
+	var filtered []int
+	for i, task := range tm.allTasks {
+		if tm.filterTag == "" || slices.Contains(task.Tags, tm.filterTag) {
+			filtered = append(filtered, i)
 		}
-		tm.filteredTasks = filtered
 	}
+	tm.filteredTaskIndices = filtered
 }
 
 func (tm *taskQueue) Sync(tasks []Task) {
@@ -110,10 +105,6 @@ func (tm *taskQueue) CurrentTag() string {
 	return tm.filterTag
 }
 
-func (tm *taskQueue) Tasks() []Task {
-	return tm.filteredTasks
-}
-
 func (tm *taskQueue) AllTags() []string {
 	tags := make([]string, 0, len(tm.tagToTaskCnt))
 	for tag := range tm.tagToTaskCnt {
@@ -123,30 +114,23 @@ func (tm *taskQueue) AllTags() []string {
 }
 
 func (tm *taskQueue) Size() int {
-	return len(tm.filteredTasks)
+	return len(tm.filteredTaskIndices)
 }
 
-func (tm *taskQueue) Queue(t Task) Task {
-	if t.ID == uuid.Nil {
-		t.ID = uuid.New()
-	}
-	t.QueuedAt = time.Now()
-	t.StartedAt = time.Time{}
+func (tm *taskQueue) Queue(t Task) {
 	tm.allTasks = append([]Task{t}, tm.allTasks...)
 	for _, tag := range t.Tags {
 		tm.tagToTaskCnt[tag] += 1
 	}
 	tm.filter()
-	return t
 }
 
 func (tm *taskQueue) Dequeue() Task {
 	task := *tm.Peek()
-	tm.filteredTasks = tm.filteredTasks[1:]
+	i := tm.filteredTaskIndices[len(tm.filteredTaskIndices)-1]
+	tm.filteredTaskIndices = tm.filteredTaskIndices[:len(tm.filteredTaskIndices)-1]
 
-	tm.allTasks = slices.DeleteFunc(tm.allTasks, func(t Task) bool {
-		return t.ID == task.ID
-	})
+	tm.allTasks = slices.Delete(tm.allTasks, i, i+1)
 
 	for _, tag := range task.Tags {
 		if tm.tagToTaskCnt[tag] == 1 {
@@ -164,5 +148,6 @@ func (tm *taskQueue) Peek() *Task {
 		return nil
 	}
 
-	return &tm.filteredTasks[0]
+	i := tm.filteredTaskIndices[len(tm.filteredTaskIndices)-1]
+	return &tm.allTasks[i]
 }

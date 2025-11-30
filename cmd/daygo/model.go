@@ -154,6 +154,10 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 		}
 		m.taskQueue.Sync(msg.tasksToQueue)
 		return m, m.sync
+	case QueueMsg:
+		m.taskQueue.Queue(msg.task)
+		m.addAlert(fmt.Sprintf("Queued \"%s\"", msg.task.Name), colorCyan)
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.h = msg.Height
 		m.userinput.Width = msg.Width
@@ -639,17 +643,19 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 				m.addAlert("usage: /a <task>", colorYellow)
 				return m, nil
 			}
-			t := m.taskQueue.Queue(TaskFromName(parts[1]))
-			m.addAlert(fmt.Sprintf("Queued \"%s\"", t.Name), colorCyan)
+			t := TaskFromName(parts[1])
 			return m, func() tea.Msg {
 				timeout, c := m.newTimeout()
 				defer c()
-				if _, err := m.taskSvc.UpsertTask(timeout, t); err != nil {
+				inserted, err := m.taskSvc.UpsertTask(timeout, t)
+				if err != nil {
 					return ErrorMsg{
 						err: err,
 					}
 				}
-				return nil
+				return QueueMsg{
+					task: inserted,
+				}
 			}
 		case "/k":
 			if !m.currentTask().IsPending() {
@@ -666,17 +672,19 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 			t := m.taskQueue.Dequeue()
 			t.StartedAt = time.Now()
 			m.taskLog = append(m.taskLog, t)
-			queued := m.taskQueue.Queue(curr)
 
 			return m, func() tea.Msg {
 				timeout, c := m.newTimeout()
 				defer c()
-				if _, err := m.taskSvc.UpsertTask(timeout, queued); err != nil {
+				updated, err := m.taskSvc.UpsertTask(timeout, curr)
+				if err != nil {
 					return ErrorMsg{
 						err: err,
 					}
 				}
-				return nil
+				return QueueMsg{
+					task: updated,
+				}
 			}
 		case "/t":
 			if len(parts) < 2 {

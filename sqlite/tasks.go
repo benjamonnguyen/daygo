@@ -218,12 +218,9 @@ func (r *taskRepo) InsertTask(ctx context.Context, task daygo.TaskRecord) (daygo
 	db := r.dbGetter(ctx)
 	now := time.Now()
 
-	// Generate UUID for new task
-	id := uuid.New()
-
 	existingRecord := daygo.ExistingTaskRecord{
 		TaskRecord: task,
-		ID:         id,
+		ID:         uuid.New(),
 		CreatedAt:  now,
 		UpdatedAt:  now,
 	}
@@ -236,7 +233,6 @@ func (r *taskRepo) InsertTask(ctx context.Context, task daygo.TaskRecord) (daygo
 		return daygo.ExistingTaskRecord{}, err
 	}
 
-	// Return the created task directly since we already have the ID
 	r.l.Debug("created task", "task", existingRecord)
 	return existingRecord, nil
 }
