@@ -15,9 +15,11 @@ type SyncSessionRepo interface {
 
 // SyncSessionRecord represents the data needed to create a new sync session
 type SyncSessionRecord struct {
-	ServerURL string
-	Status    SyncStatus
-	Error     string
+	ServerURL           string
+	Status              SyncStatus
+	Error               string
+	ToServerSyncCount   *int
+	FromServerSyncCount *int
 }
 
 // ExistingSyncSessionRecord represents a sync session that exists in the database
@@ -42,5 +44,6 @@ type SyncRequest struct {
 }
 
 type SyncResponse struct {
-	ServerTasks []ExistingTaskRecord `json:"server_tasks"`
+	ServerTasks       []ExistingTaskRecord `json:"server_tasks"`
+	ToServerSyncCount int                  `json:"to_server_sync_count"`
 }

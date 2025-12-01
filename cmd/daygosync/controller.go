@@ -10,6 +10,7 @@ import (
 
 	"github.com/Thiht/transactor"
 	"github.com/benjamonnguyen/daygo"
+	"github.com/benjamonnguyen/daygo/sqlite"
 	"github.com/google/uuid"
 )
 
@@ -46,14 +47,13 @@ func (c *controller) Sync(w http.ResponseWriter, r *http.Request) {
 	}
 	c.logger.Info("Sync", "request", syncReq)
 
-	// Validate request
-	if syncReq.LastSyncTime.IsZero() {
-		c.logAndWriteError(w, &httpError{http.StatusBadRequest, "LastSyncTime field is required"})
-		return
-	}
-
 	// Process client tasks with conflict resolution within transaction
-	err := c.transactor.WithinTransaction(r.Context(), c.syncClientTasks(r.Context(), syncReq.ClientTasks))
+	toServerSyncCount := 0
+	err := c.transactor.WithinTransaction(r.Context(), func(ctx context.Context) error {
+		cnt, err := c.syncClientTasks(ctx, syncReq.ClientTasks)
+		toServerSyncCount = cnt
+		return err
+	})
 	if c.logAndWriteError(w, err) {
 		return
 	}
@@ -68,7 +68,8 @@ func (c *controller) Sync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response := daygo.SyncResponse{
-		ServerTasks: serverTasks,
+		ServerTasks:       serverTasks,
+		ToServerSyncCount: toServerSyncCount,
 	}
 	c.logger.Info("Sync", "response", response)
 
@@ -93,55 +94,56 @@ func (c *controller) logAndWriteError(w http.ResponseWriter, err error) bool {
 	return true
 }
 
-func (c *controller) syncClientTasks(ctx context.Context, tasks []daygo.ExistingTaskRecord) func(context.Context) error {
-	return func(context.Context) error {
-		var existingTaskIDs []any
-		for _, clientTask := range tasks {
-			if clientTask.ID != uuid.Nil {
-				existingTaskIDs = append(existingTaskIDs, clientTask.ID.String())
-			}
+func (c *controller) syncClientTasks(ctx context.Context, tasks []daygo.ExistingTaskRecord) (int, error) {
+	var existingTaskIDs []any
+	for _, clientTask := range tasks {
+		if clientTask.ID != uuid.Nil {
+			existingTaskIDs = append(existingTaskIDs, clientTask.ID.String())
 		}
-
-		var existingTasks []daygo.ExistingTaskRecord
-		if len(existingTaskIDs) > 0 {
-			existing, err := c.taskRepo.GetTasks(ctx, existingTaskIDs)
-			if err != nil {
-				return httpError{
-					code: http.StatusInternalServerError,
-					msg:  "Failed to get existing tasks: " + err.Error(),
-				}
-			}
-			existingTasks = existing
-		}
-
-		taskIDToExistingRecord := make(map[string]daygo.ExistingTaskRecord)
-		for _, task := range existingTasks {
-			taskIDToExistingRecord[task.ID.String()] = task
-		}
-
-		for _, clientTask := range tasks {
-			serverTask, exists := taskIDToExistingRecord[clientTask.ID.String()]
-			if clientTask.ID == uuid.Nil || !exists {
-				// New task - create it
-				_, err := c.taskRepo.InsertTask(ctx, clientTask.TaskRecord)
-				if err != nil {
-					return httpError{
-						code: http.StatusInternalServerError,
-						msg:  "Failed to create task: " + err.Error(),
-					}
-				}
-			} else if clientTask.UpdatedAt.After(serverTask.UpdatedAt) {
-				// Client has newer version - update task
-				_, err := c.taskRepo.UpdateTask(ctx, clientTask.ID, clientTask.TaskRecord)
-				if err != nil {
-					return httpError{
-						code: http.StatusInternalServerError,
-						msg:  "Failed to update task: " + err.Error(),
-					}
-				}
-			}
-		}
-
-		return nil
 	}
+
+	var existingTasks []daygo.ExistingTaskRecord
+	if len(existingTaskIDs) > 0 {
+		existing, err := c.taskRepo.GetTasks(ctx, existingTaskIDs)
+		if err != nil && !errors.Is(err, sqlite.ErrNotFound) {
+			return 0, httpError{
+				code: http.StatusInternalServerError,
+				msg:  "Failed getting existing tasks: " + err.Error(),
+			}
+		}
+		existingTasks = existing
+	}
+
+	taskIDToExistingRecord := make(map[string]daygo.ExistingTaskRecord)
+	for _, task := range existingTasks {
+		taskIDToExistingRecord[task.ID.String()] = task
+	}
+
+	var cnt int
+	for _, clientTask := range tasks {
+		serverTask, exists := taskIDToExistingRecord[clientTask.ID.String()]
+		if clientTask.ID == uuid.Nil || !exists {
+			// New task - create it
+			_, err := c.taskRepo.InsertTask(ctx, clientTask.TaskRecord)
+			if err != nil {
+				return 0, httpError{
+					code: http.StatusInternalServerError,
+					msg:  "Failed to create task: " + err.Error(),
+				}
+			}
+			cnt += 1
+		} else if clientTask.UpdatedAt.After(serverTask.UpdatedAt) {
+			// Client has newer version - update task
+			_, err := c.taskRepo.UpdateTask(ctx, clientTask.ID, clientTask.TaskRecord)
+			if err != nil {
+				return 0, httpError{
+					code: http.StatusInternalServerError,
+					msg:  "Failed to update task: " + err.Error(),
+				}
+			}
+			cnt += 1
+		}
+	}
+
+	return cnt, nil
 }

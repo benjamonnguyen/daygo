@@ -14,15 +14,17 @@ import (
 )
 
 const (
-	SelectAllSyncSessions = "SELECT id, server_url, status, error, created_at FROM sync_sessions"
+	SelectAllSyncSessions = "SELECT id, server_url, status, error, to_server_sync_count, from_server_sync_count, created_at FROM sync_sessions"
 )
 
 type syncSessionEntity struct {
-	ID        int
-	ServerURL string
-	Status    int
-	Error     sql.NullString
-	CreatedAt int64
+	ID                  int
+	ServerURL           string
+	Status              int
+	Error               sql.NullString
+	ToServerSyncCount   sql.NullInt64
+	FromServerSyncCount sql.NullInt64
+	CreatedAt           int64
 }
 
 // syncSessionRepo
@@ -83,9 +85,9 @@ func (r *syncSessionRepo) InsertSession(ctx context.Context, session daygo.SyncS
 	}
 	e := mapToSyncSessionEntity(existingRecord)
 
-	query := `INSERT INTO sync_sessions (server_url, status, error, created_at) VALUES (?, ?, ?, ?)`
+	query := `INSERT INTO sync_sessions (server_url, status, error, to_server_sync_count, from_server_sync_count, created_at) VALUES (?, ?, ?, ?, ?, ?)`
 	r.l.Debug("creating sync session", "query", query, "entity", e)
-	result, err := db.ExecContext(ctx, query, e.ServerURL, e.Status, e.Error, e.CreatedAt)
+	result, err := db.ExecContext(ctx, query, e.ServerURL, e.Status, e.Error, e.ToServerSyncCount, e.FromServerSyncCount, e.CreatedAt)
 	if err != nil {
 		return daygo.ExistingSyncSessionRecord{}, err
 	}
@@ -97,7 +99,6 @@ func (r *syncSessionRepo) InsertSession(ctx context.Context, session daygo.SyncS
 	}
 	existingRecord.ID = int(insertedID)
 
-	r.l.Debug("created sync session", "session", existingRecord)
 	return existingRecord, nil
 }
 
@@ -107,20 +108,19 @@ func (r *syncSessionRepo) UpdateSession(ctx context.Context, id int, updated day
 		return existing, err
 	}
 
+	query := "UPDATE sync_sessions SET server_url = ?, status = ?, error = ?, to_server_sync_count = ?, from_server_sync_count = ? WHERE id = ?"
 	existing.SyncSessionRecord = updated
 	e := mapToSyncSessionEntity(existing)
 
+	r.l.Debug("updating sync session", "query", query, "entity", e)
 	if _, err := r.dbGetter(ctx).ExecContext(
 		ctx,
-		`UPDATE sync_sessions
-		SET server_url = ?, status = ?, error = ?
-		WHERE id = ?`,
-		e.ServerURL, e.Status, e.Error, e.ID,
+		query,
+		e.ServerURL, e.Status, e.Error, e.ToServerSyncCount, e.FromServerSyncCount, e.ID,
 	); err != nil {
 		return daygo.ExistingSyncSessionRecord{}, err
 	}
 
-	r.l.Debug("updated sync session", "session", existing)
 	return existing, nil
 }
 
@@ -141,9 +141,9 @@ func (r *syncSessionRepo) DeleteSession(ctx context.Context, id int) (daygo.Exis
 
 func extractSyncSession(s scannable) (daygo.ExistingSyncSessionRecord, error) {
 	var e syncSessionEntity
-	if err := s.Scan(&e.ID, &e.ServerURL, &e.Status, &e.Error, &e.CreatedAt); err != nil {
+	if err := s.Scan(&e.ID, &e.ServerURL, &e.Status, &e.Error, &e.ToServerSyncCount, &e.FromServerSyncCount, &e.CreatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return daygo.ExistingSyncSessionRecord{}, ErrNotFound
+			return daygo.ExistingSyncSessionRecord{}, fmt.Errorf("failed to extract sync session: %w", ErrNotFound)
 		}
 		return daygo.ExistingSyncSessionRecord{}, err
 	}
@@ -165,6 +165,22 @@ func mapToSyncSessionEntity(session daygo.ExistingSyncSessionRecord) syncSession
 		}
 	}
 
+	// Handle ToServerSyncCount as nullable int64
+	if session.ToServerSyncCount != nil {
+		e.ToServerSyncCount = sql.NullInt64{
+			Valid: true,
+			Int64: int64(*session.ToServerSyncCount),
+		}
+	}
+
+	// Handle FromServerSyncCount as nullable int64
+	if session.FromServerSyncCount != nil {
+		e.FromServerSyncCount = sql.NullInt64{
+			Valid: true,
+			Int64: int64(*session.FromServerSyncCount),
+		}
+	}
+
 	return e
 }
 
@@ -175,13 +191,29 @@ func mapToExistingSyncSessionRecord(e syncSessionEntity) daygo.ExistingSyncSessi
 		errorStr = e.Error.String
 	}
 
+	// Handle ToServerSyncCount as *int
+	var toServerSyncCount *int
+	if e.ToServerSyncCount.Valid {
+		val := int(e.ToServerSyncCount.Int64)
+		toServerSyncCount = &val
+	}
+
+	// Handle FromServerSyncCount as *int
+	var fromServerSyncCount *int
+	if e.FromServerSyncCount.Valid {
+		val := int(e.FromServerSyncCount.Int64)
+		fromServerSyncCount = &val
+	}
+
 	return daygo.ExistingSyncSessionRecord{
 		ID:        e.ID,
 		CreatedAt: time.Unix(e.CreatedAt, 0).Local(),
 		SyncSessionRecord: daygo.SyncSessionRecord{
-			ServerURL: e.ServerURL,
-			Status:    daygo.SyncStatus(e.Status),
-			Error:     errorStr,
+			ServerURL:           e.ServerURL,
+			Status:              daygo.SyncStatus(e.Status),
+			Error:               errorStr,
+			ToServerSyncCount:   toServerSyncCount,
+			FromServerSyncCount: fromServerSyncCount,
 		},
 	}
 }

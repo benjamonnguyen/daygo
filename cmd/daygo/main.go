@@ -26,12 +26,16 @@ var logger daygo.Logger
 
 func main() {
 	// cfg
-	confDir, _ := os.UserConfigDir()
-	cfg, err := LoadConf(path.Join(confDir, "daygo", "daygo.conf"))
+	cfgDir, _ := os.UserConfigDir()
+	cfgPath := path.Join(cfgDir, "daygo", "daygo.conf")
+	if myCfgPath := os.Getenv("DAYGO_CFG_PATH"); myCfgPath != "" {
+		cfgPath = myCfgPath
+	}
+	cfg, err := LoadConf(cfgPath)
 	if err != nil {
 		panic(err)
 	}
-	var logPath, logLvl, dbURL, timeFormat, syncServerURL, syncRate string
+	var logPath, logLvl, dbURL, timeFormat, syncServerURL, syncRate, cmdTimeout string
 	if err := cfg.GetMany([]config.Key{
 		KeyLogPath,
 		KeyLogLevel,
@@ -39,10 +43,15 @@ func main() {
 		KeyTimeFormat,
 		KeySyncServerURL,
 		KeySyncRate,
-	}, &logPath, &logLvl, &dbURL, &timeFormat, &syncServerURL, &syncRate); err != nil {
+		KeyCmdTimeout,
+	}, &logPath, &logLvl, &dbURL, &timeFormat, &syncServerURL, &syncRate, &cmdTimeout); err != nil {
 		panic(err)
 	}
 	sr, err := time.ParseDuration(syncRate)
+	if err != nil {
+		panic(err)
+	}
+	cmdTo, err := time.ParseDuration(cmdTimeout)
 	if err != nil {
 		panic(err)
 	}
@@ -50,11 +59,12 @@ func main() {
 	// logger
 	var w io.Writer
 	if logPath != "" {
-		f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE, 0o644)
+		f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 		if err != nil {
 			panic(err)
 		}
 		defer f.Close() //nolint:errcheck
+		w = f
 	}
 	logger = charmlog.NewLogger(charmlog.Options{
 		Writer: w,
@@ -104,7 +114,7 @@ func main() {
 	fmt.Printf("\nEnter \"/h\" for help\n\n")
 
 	m := NewModel(taskSvc, opts.tasks, logger, modelOptions{
-		cmdTimeout:    3 * time.Second,
+		cmdTimeout:    cmdTo,
 		timeFormat:    timeFormat,
 		syncServerURL: syncServerURL,
 		syncRate:      sr,
