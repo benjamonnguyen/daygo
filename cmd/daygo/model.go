@@ -98,7 +98,7 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		m.initTaskQueue,
 		textinput.Blink,
-		m.sync,
+		m.checkSyncServerURL,
 	)
 }
 
@@ -125,8 +125,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ErrorMsg:
-		m.addAlert(msg.err.Error(), colorRed)
-		return m, tea.Quit
+		m.addAlert(colorRed, msg.err.Error())
+		m.l.Error(msg.err)
+		var cmd tea.Cmd
+		if msg.isFatal {
+			cmd = tea.Quit
+		}
+		return m, cmd
 	case timer.TimeoutMsg:
 		if msg.ID == m.tbTimer.ID() {
 			ended, err := m.endPendingTask()
@@ -149,14 +154,23 @@ func (m model) updateParent(msg tea.Msg) (model, tea.Cmd) {
 		}
 		return m, nil
 	case SyncMsg:
-		if msg.error != "" {
-			m.addAlert(msg.error, colorRed)
+		if msg.err != "" {
+			m.addAlert(colorRed, msg.err)
 		}
-		m.taskQueue.Sync(msg.tasksToQueue)
-		return m, m.sync
+		if msg.toServerSyncCount > 0 {
+			m.addAlert(colorCyan, "Synced %d tasks to server", msg.toServerSyncCount)
+		}
+		if len(msg.tasksToQueue) > 0 {
+			m.taskQueue.Sync(msg.tasksToQueue)
+			m.addAlert(colorCyan, "Queued %d tasks from sync server", len(msg.tasksToQueue))
+		}
+		return m, func() tea.Msg {
+			time.Sleep(m.opts.syncRate)
+			return m.sync()
+		}
 	case QueueMsg:
 		m.taskQueue.Queue(msg.task)
-		m.addAlert(fmt.Sprintf("Queued \"%s\"", msg.task.Name), colorCyan)
+		m.addAlert(colorCyan, "Queued \"%s\"", msg.task.Name)
 		return m, nil
 	case tea.WindowSizeMsg:
 		m.h = msg.Height
@@ -218,12 +232,10 @@ func (m model) initTaskQueue() tea.Msg {
 
 func (m model) endProgram(discardPendingTask bool) (model, tea.Cmd) {
 	m.quitting = true
-	if discardPendingTask && m.taskQueue.Size() > 0 {
-		_ = m.removeCurrentTask()
-	}
-	if t := m.currentTask(); t != nil {
-		t.IsTerminal = true
-		if t.IsPending() {
+	if t := m.currentTask(); t.IsPending() {
+		if discardPendingTask {
+			_ = m.removeCurrentTask()
+		} else {
 			timeout, cancel := m.newTimeout()
 			defer cancel()
 			t.EndedAt = time.Now()
@@ -231,9 +243,27 @@ func (m model) endProgram(discardPendingTask bool) (model, tea.Cmd) {
 				logger.Error(err.Error())
 			}
 		}
+		if curr := m.currentTask(); curr != nil {
+			curr.IsTerminal = true
+		}
+		m.vp.SetContent(m.renderVisibleTasks())
 		m.resizeViewport()
 	}
+	m.sync()
 	return m, tea.Quit
+}
+
+func (m model) checkSyncServerURL() tea.Msg {
+	if m.opts.syncServerURL == "" {
+		return nil
+	}
+	_, err := http.Head(m.opts.syncServerURL)
+	if err != nil {
+		return ErrorMsg{
+			err: fmt.Errorf("failed to connect to syncServerURL: %s", m.opts.syncServerURL),
+		}
+	}
+	return SyncMsg{}
 }
 
 func (m model) sync() tea.Msg {
@@ -286,7 +316,7 @@ func (m model) sync() tea.Msg {
 			}
 		}
 		return SyncMsg{
-			error: session.Error,
+			err: session.Error,
 		}
 	}
 
@@ -296,6 +326,8 @@ func (m model) sync() tea.Msg {
 	}
 
 	session.Status = daygo.SyncStatusPartial
+	toServerSyncCnt := syncResp.ToServerSyncCount
+	session.ToServerSyncCount = &toServerSyncCnt
 	created, err := m.taskSvc.UpsertSyncSession(timeout, 0, session)
 	if err != nil {
 		return ErrorMsg{
@@ -306,18 +338,22 @@ func (m model) sync() tea.Msg {
 	upserted, errs := m.taskSvc.SyncTasks(timeout, syncResp.ServerTasks)
 	if len(errs) > 0 {
 		// has error but still partial sync status
+		session.Status = daygo.SyncStatusPartial
 		session.Error = errors.Join(errs...).Error()
 	} else {
 		session.Status = daygo.SyncStatusSuccess
 	}
+	fromServerSyncCnt := len(upserted)
+	session.FromServerSyncCount = &fromServerSyncCnt
 	if _, err := m.taskSvc.UpsertSyncSession(timeout, created.ID, session); err != nil {
 		return ErrorMsg{
 			err: err,
 		}
 	}
-	time.Sleep(m.opts.syncRate)
+
 	return SyncMsg{
-		tasksToQueue: upserted,
+		tasksToQueue:      upserted,
+		toServerSyncCount: toServerSyncCnt,
 	}
 }
 
@@ -414,8 +450,8 @@ func (m model) newTimeout() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), m.opts.cmdTimeout)
 }
 
-func (m *model) addAlert(alert string, c color) {
-	m.alerts = append(m.alerts, colorize(c, alert))
+func (m *model) addAlert(c color, format string, args ...any) {
+	m.alerts = append(m.alerts, colorize(c, fmt.Sprintf(format, args...)))
 }
 
 func (m model) currentTask() *Task {
@@ -525,12 +561,12 @@ func (m *model) removeLastNote() Note {
 
 func (m *model) timeBlockPendingTask(arg string) {
 	if !timeRe.MatchString(arg) {
-		m.addAlert("usage: /t <HHMM>", colorYellow)
+		m.addAlert(colorYellow, "usage: /t <HHMM>")
 		return
 	}
 	task := m.currentTask()
 	if !task.IsPending() {
-		m.addAlert("no pending task to time block", colorRed)
+		m.addAlert(colorRed, "no pending task to time block")
 		return
 	}
 	now, _ := time.Parse("1504", time.Now().Format("1504"))
@@ -563,7 +599,7 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 			var started Task
 			if len(parts) < 2 {
 				if m.taskQueue.Size() == 0 {
-					m.addAlert("task queue is empty", colorRed)
+					m.addAlert(colorRed, "task queue is empty")
 					return m, nil
 				}
 
@@ -591,7 +627,7 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 			return m, persistEnded
 		case "/x":
 			if !m.currentTask().IsPending() {
-				m.addAlert("nothing left to delete", colorRed)
+				m.addAlert(colorRed, "nothing left to delete")
 				return m, nil
 			}
 			deleted := m.deleteLastPendingTaskItem()
@@ -616,11 +652,11 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 			}
 			return m, cmd
 		case "/h":
-			m.addAlert(commandHelp, colorYellow)
+			m.addAlert(colorYellow, commandHelp)
 			return m, nil
 		case "/e":
 			if len(parts) < 2 {
-				m.addAlert("usage: /e <edit>", colorYellow)
+				m.addAlert(colorYellow, "usage: /e <edit>")
 				return m, nil
 			}
 			var cmd tea.Cmd
@@ -640,7 +676,7 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 			return m, cmd
 		case "/a":
 			if len(parts) < 2 {
-				m.addAlert("usage: /a <task>", colorYellow)
+				m.addAlert(colorYellow, "usage: /a <task>")
 				return m, nil
 			}
 			t := TaskFromName(parts[1])
@@ -659,11 +695,11 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 			}
 		case "/k":
 			if !m.currentTask().IsPending() {
-				m.addAlert("no pending task to skip", colorRed)
+				m.addAlert(colorRed, "no pending task to skip")
 				return m, nil
 			}
 			if m.taskQueue.Size() == 0 {
-				m.addAlert("task queue is empty", colorRed)
+				m.addAlert(colorRed, "task queue is empty")
 				return m, nil
 
 			}
@@ -688,7 +724,7 @@ func (m model) handleInput(input string) (model, tea.Cmd) {
 			}
 		case "/t":
 			if len(parts) < 2 {
-				m.addAlert("usage: /t <HHMM>", colorYellow)
+				m.addAlert(colorYellow, "usage: /t <HHMM>")
 				return m, nil
 			}
 			m.timeBlockPendingTask(parts[1])

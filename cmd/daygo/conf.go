@@ -15,6 +15,7 @@ const (
 	KeyTimeFormat    config.Key = "DAYGO_TIME_FORMAT"
 	KeySyncServerURL config.Key = "DAYGO_SYNC_SERVER_URL"
 	KeySyncRate      config.Key = "DAYGO_SYNC_RATE"
+	KeyCmdTimeout    config.Key = "DAYGO_CMD_TIMEOUT"
 )
 
 var (
@@ -50,6 +51,11 @@ func LoadConf(src string) (config.Config, error) {
 		{
 			Key:      KeySyncRate,
 			Default:  "5m",
+			Required: true,
+		},
+		{
+			Key:      KeyCmdTimeout,
+			Default:  "3s",
 			Required: true,
 		},
 	}

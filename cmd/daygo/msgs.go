@@ -9,12 +9,14 @@ type EndProgramMsg struct {
 }
 
 type ErrorMsg struct {
-	err error
+	err     error
+	isFatal bool
 }
 
 type SyncMsg struct {
-	tasksToQueue []Task
-	error        string
+	tasksToQueue      []Task
+	toServerSyncCount int
+	err               string
 }
 
 type QueueMsg struct {
