@@ -88,25 +88,39 @@ func (r taskRepo) GetTasks(ctx context.Context, ids []any) ([]daygo.ExistingTask
 		return nil, err
 	}
 	if len(tasks) != len(ids) {
-		return nil, fmt.Errorf("expected %d tasks, got %d: %+v", len(ids), len(tasks), tasks)
+		return nil, fmt.Errorf("expected %d tasks, got %d: %+v: %w", len(ids), len(tasks), tasks, ErrNotFound)
 	}
 	return tasks, nil
 }
 
 func (r *taskRepo) GetByStartTime(ctx context.Context, min, max time.Time) ([]daygo.ExistingTaskRecord, error) {
 	query := SelectAll
-	if min.IsZero() && max.IsZero() {
+	var args []any
+	if !min.IsZero() && !max.IsZero() {
+		query += " WHERE started_at BETWEEN ? AND ?"
+		args = append(args, min.Unix(), max.Unix())
+	} else if !min.IsZero() {
+		query += " WHERE created_at >= ?"
+		args = append(args, min.Unix())
+	} else if !max.IsZero() {
+		query += " WHERE created_at <= ?"
+		args = append(args, max.Unix())
+	} else {
 		query += " WHERE started_at ISNULL"
 	}
 
 	db := r.dbGetter(ctx)
-	r.l.Debug("GetByStartTime", "query", query)
-	rows, err := db.QueryContext(ctx, query)
+	r.l.Debug("GetByStartTime", "query", query, "args", args)
+	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 
-	return extractTasks(rows)
+	tasks, err := extractTasks(rows)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	return tasks, nil
 }
 
 func (r *taskRepo) GetByParentID(ctx context.Context, parentID uuid.UUID) ([]daygo.ExistingTaskRecord, error) {
@@ -226,14 +240,23 @@ func (r *taskRepo) InsertTask(ctx context.Context, task daygo.TaskRecord) (daygo
 	}
 	e := mapToTaskEntity(existingRecord)
 
-	query := `INSERT INTO tasks (id, name, parent_id, started_at, created_at, updated_at, queued_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
-	r.l.Debug("creating task", "query", query, "entity", e)
-	_, err := db.ExecContext(ctx, query, e.ID, e.Name, e.ParentID, e.StartedAt, e.CreatedAt, e.UpdatedAt, e.QueuedAt)
+	args := []any{
+		e.ID,
+		e.Name,
+		e.ParentID,
+		e.StartedAt,
+		e.EndedAt,
+		e.CreatedAt,
+		e.UpdatedAt,
+		e.QueuedAt,
+	}
+	query := "INSERT INTO tasks (id, name, parent_id, started_at, ended_at, created_at, updated_at, queued_at) VALUES " + generateParameters(len(args))
+	r.l.Debug("creating task", "query", query, "args", args)
+	_, err := db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return daygo.ExistingTaskRecord{}, err
 	}
 
-	r.l.Debug("created task", "task", existingRecord)
 	return existingRecord, nil
 }
 
@@ -247,19 +270,21 @@ func (r *taskRepo) UpdateTask(ctx context.Context, id uuid.UUID, updated daygo.T
 	existing.UpdatedAt = time.Now()
 	e := mapToTaskEntity(existing)
 
-	db := r.dbGetter(ctx)
-	_, err = db.ExecContext(
-		ctx,
-		`UPDATE tasks
-		SET ended_at = ?, name = ?, started_at = ?, updated_at = ?, queued_at = ?
-		WHERE id = ?`,
-		e.EndedAt, e.Name, e.StartedAt, e.UpdatedAt, e.QueuedAt, e.ID,
-	)
+	query := "UPDATE tasks SET name = ?, started_at = ?, ended_at = ?, queued_at = ?, updated_at = ? WHERE id = ?"
+	args := []any{
+		e.Name,
+		e.StartedAt,
+		e.EndedAt,
+		e.QueuedAt,
+		e.UpdatedAt,
+		e.ID,
+	}
+	r.l.Debug("updating task", "query", query, "args", args)
+	_, err = r.dbGetter(ctx).ExecContext(ctx, query, args...)
 	if err != nil {
 		return daygo.ExistingTaskRecord{}, err
 	}
 
-	r.l.Debug("updated task", "task", existing)
 	return existing, nil
 }
 
@@ -269,7 +294,7 @@ func (r *taskRepo) DeleteTasks(ctx context.Context, ids []any) ([]daygo.Existing
 		return nil, err
 	}
 	if len(toDelete) != len(ids) {
-		return nil, fmt.Errorf("expected %d existing tasks, found %d", len(ids), len(toDelete))
+		return nil, fmt.Errorf("expected %d existing tasks, found %d: %w", len(ids), len(toDelete), ErrNotFound)
 	}
 
 	db := r.dbGetter(ctx)

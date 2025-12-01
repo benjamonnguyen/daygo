@@ -56,7 +56,7 @@ func (s *taskSvc) SyncTasks(ctx context.Context, serverTasks []daygo.ExistingTas
 
 	// Get existing client tasks
 	clientTasks, err := s.taskRepo.GetTasks(ctx, serverTaskIDs)
-	if err != nil {
+	if err != nil && !errors.Is(err, sqlite.ErrNotFound) {
 		return nil, []error{err}
 	}
 
@@ -148,25 +148,36 @@ func (s *taskSvc) DeleteTask(ctx context.Context, id uuid.UUID) ([]daygo.Existin
 }
 
 func (s *taskSvc) GetTasksToSync(ctx context.Context, serverURL string) ([]daygo.ExistingTaskRecord, error) {
-	lastSyncSession, err := s.syncSessionRepo.GetLastSession(ctx, serverURL, daygo.SyncStatusPartial)
+	var lastSync daygo.ExistingSyncSessionRecord
+	lastPartialSync, err := s.syncSessionRepo.GetLastSession(ctx, serverURL, daygo.SyncStatusPartial)
 	if err != nil {
-		return nil, err
+		if !errors.Is(err, sqlite.ErrNotFound) {
+			return nil, err
+		}
+	} else {
+		lastSync = lastPartialSync
 	}
-	if lastSyncSession.ID == 0 {
+	lastSuccessfulSync, err := s.syncSessionRepo.GetLastSession(ctx, serverURL, daygo.SyncStatusSuccess)
+	if err != nil {
+		if !errors.Is(err, sqlite.ErrNotFound) {
+			return nil, err
+		}
+	} else if lastSuccessfulSync.CreatedAt.After(lastSync.CreatedAt) {
+		lastSync = lastSuccessfulSync
+	}
+	if lastSync.ID == 0 {
 		return s.taskRepo.GetAllTasks(ctx)
 	}
 
-	lastSyncTime := lastSyncSession.CreatedAt
-	tasks, err := s.taskRepo.GetByUpdateTime(ctx, lastSyncTime, time.Time{})
-	if err != nil {
-		return nil, err
-	}
-
-	return tasks, nil
+	return s.taskRepo.GetByUpdateTime(ctx, lastSync.CreatedAt, time.Time{})
 }
 
 func (s *taskSvc) GetLastSuccessfulSync(ctx context.Context, serverURL string) (daygo.ExistingSyncSessionRecord, error) {
-	return s.syncSessionRepo.GetLastSession(ctx, serverURL, daygo.SyncStatusSuccess)
+	session, err := s.syncSessionRepo.GetLastSession(ctx, serverURL, daygo.SyncStatusSuccess)
+	if err != nil && !errors.Is(err, sqlite.ErrNotFound) {
+		return session, err
+	}
+	return session, nil
 }
 
 func (s *taskSvc) UpsertSyncSession(ctx context.Context, id int, session daygo.SyncSessionRecord) (daygo.ExistingSyncSessionRecord, error) {

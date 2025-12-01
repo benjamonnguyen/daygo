@@ -3,6 +3,8 @@ CREATE TABLE IF NOT EXISTS sync_sessions (
     server_url TEXT NOT NULL,
     status INTEGER NOT NULL,
     error TEXT,
+    to_server_sync_count INTEGER,
+    from_server_sync_count INTEGER,
     created_at INTEGER NOT NULL
 );
 
