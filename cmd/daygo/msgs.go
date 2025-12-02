@@ -22,3 +22,7 @@ type SyncMsg struct {
 type QueueMsg struct {
 	task Task
 }
+
+type QueueMsg struct {
+	task Task
+}

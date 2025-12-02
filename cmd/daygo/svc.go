@@ -196,3 +196,20 @@ func (s *taskSvc) UpsertSyncSession(ctx context.Context, id int, session daygo.S
 	}
 	return updated, nil
 }
+
+func (s *taskSvc) UpsertSyncSession(ctx context.Context, id int, session daygo.SyncSessionRecord) (daygo.ExistingSyncSessionRecord, error) {
+	// insert
+	if id == 0 {
+		inserted, err := s.syncSessionRepo.InsertSession(ctx, session)
+		if err != nil {
+			return daygo.ExistingSyncSessionRecord{}, err
+		}
+		return inserted, nil
+	}
+	// update
+	updated, err := s.syncSessionRepo.UpdateSession(ctx, id, session)
+	if err != nil {
+		return daygo.ExistingSyncSessionRecord{}, err
+	}
+	return updated, nil
+}
